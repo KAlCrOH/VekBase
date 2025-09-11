@@ -1,0 +1,122 @@
+## Implementation Orders (Checklist)
+
+Legende: [x] erledigt / [ ] offen / [~] Stub (minimal, Ausbau nötig)
+
+### 1. Setup
+1.1 [x] Dependencies aktualisieren (pyproject)  
+1.2 [x] `.env.example` erstellen  
+1.3 [x] Ordnerstruktur anlegen  
+
+### 2. Dokumentation
+2.1 [x] README  
+2.2 [x] ARCHITECTURE.md  
+2.3 [x] USAGE.md  
+2.4 [x] SETUP_GPU.md  
+2.5 [x] EVALUATION.md  
+2.6 [x] INGEST.md / QUERY.md  
+2.7 [ ] FAQ / Troubleshooting ergänzen  
+
+### 3. Core
+3.1 [x] config.py  
+3.2 [x] logging.py  
+3.3 [x] tracing.py  
+3.4 [x] ids.py  
+3.5 [ ] Request-ID Middleware  
+
+### 4. Ingest
+4.1 [x] loaders.py (txt)  
+4.2 [x] normalize.py  
+4.3 [x] splitters.py  
+4.4 [ ] Markdown/PDF Loader  
+4.5 [ ] Parquet Writer für Chunks  
+
+### 5. Embed
+5.1 [x] models.py  
+5.2 [x] embedder.py  
+5.3 [ ] Konfigurierbare Batch Size / Cache  
+
+### 6. Store
+6.1 [x] metadata.py  
+6.2 [x] faiss_store.py (Flat)  
+6.3 [ ] IVF/HNSW Unterstützung  
+6.4 [ ] Mapping id→chunk bei Parquet  
+
+### 7. Retrieval
+7.1 [x] retriever.py (Join + Scores)  
+7.2 [ ] Filter (Quelle/Tags)  
+7.3 [ ] Hybrid / Score-Normalisierung  
+
+### 8. Rerank
+8.1 [x] Stub rerank.py  
+8.2 [ ] Cross-Encoder Integration  
+8.3 [ ] Konfig Flag enable_rerank  
+
+### 9. Prompt
+9.1 [x] templates.py  
+9.2 [x] bundler.py  
+9.3 [ ] Token-Limit Handling  
+9.4 [ ] Mehrsprachige Templates  
+
+### 10. LLM
+10.1 [x] llm/client.py  
+10.2 [x] Provider Defaults  
+10.3 [ ] Streaming Responses  
+10.4 [ ] LiteLLM Proxy Support  
+
+### 11. CLI
+11.1 [x] ingest.py  
+11.2 [x] index.py  
+11.3 [x] query.py  
+11.4 [ ] CLI structlog Logging  
+11.5 [ ] Vollständiger Batch Index (nicht nur LIMIT 100)  
+
+### 12. API
+12.1 [x] routes_query.py  
+12.2 [x] routes_ingest.py (Stub)  
+12.3 [x] routes_admin.py (Stub)  
+12.4 [ ] Background Tasks (Ingest/Reindex)  
+12.5 [ ] Auth / Rate Limit  
+
+### 13. App / Server
+13.1 [x] server.py  
+13.2 [ ] CORS Config  
+13.3 [ ] Graceful Shutdown Hooks  
+
+### 14. Orchestrator
+14.1 [x] orchestrator.py  
+14.2 [ ] Rerank Hook integrieren  
+14.3 [ ] LLM Output Logging (latency, tokens)  
+
+### 15. Tooling
+15.1 [x] uvicorn_settings.json  
+15.2 [x] tasks.ps1  
+15.3 [ ] CI (Ruff + mypy + tests)  
+15.4 [ ] Pre-commit Hooks  
+15.5 [ ] Makefile / Cross-Platform Tasks  
+
+### 16. Tests
+16.1 [x] test_api.py (health)  
+16.2 [ ] test_ingest.py  
+16.3 [ ] test_retriever.py  
+16.4 [ ] test_orchestrator.py  
+16.5 [ ] Performance Smoke Test  
+
+### 17. Checkpoints
+17.1 [x] Dev Server up (/health)  
+17.2 [ ] End-to-End ingest→index→API query  
+17.3 [ ] Bundle Parquet prüfen  
+17.4 [ ] Traces sichtbar (OTel Export)  
+
+### 18. Best Practices
+18.1 [x] Evaluation Dokument  
+18.2 [ ] README GPU Beispiele (vLLM Start)  
+18.3 [ ] Security Review (API Keys)  
+18.4 [ ] Data Retention Bundles  
+18.5 [ ] Bundle Schema Versionierung  
+
+### Offene Prioritäten (Top 5)
+P1: Vollständiger Index Build + E2E Test (11.5 + 17.2)  
+P2: Parquet Ingest Pipeline (4.5)  
+P3: Rerank Integration (8.2 + 14.2)  
+P4: Streaming & Token-Limits (10.3 + 9.3)  
+P5: Testsuite Ausbau (16.x)  

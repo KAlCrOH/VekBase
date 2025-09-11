@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+dist/
+build/
+*.spec
+
+# Packaging / Build
+pip-wheel-metadata/
+*.whl
+
+# Virtual Envs
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing / Coverage
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage*
+coverage.xml
+
+# Logs
+logs/
+*.log
+
+# Data (local only)
+/data/
+*.db
+*.parquet
+
+# Notebooks outputs
+*.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+__pypackages__/
+*.bak
+*.swp
