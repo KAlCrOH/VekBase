@@ -215,9 +215,7 @@ with tabs[2]:
                     df = pd.read_csv(equity_file)
                     st.line_chart(df.set_index('ts'))
 
-from app.core import devtools as _devtools  # lazy import after feature flag set
-from app.core import linttools as _linttools
-from app.core import benchtools as _benchtools
+from app.ui import devtools_shared as _dshared  # unified wrappers
 
 # DevTools Tab (refactored to use app.core.devtools)
 with tabs[3]:
@@ -249,7 +247,7 @@ with tabs[3]:
         with col_d:
             if st.button("Discover"):
                 try:
-                    nodeids = _devtools.discover_tests(k_expr=s["filter"].strip() or None, module_substr=s["module"].strip() or None)
+                    nodeids = _dshared.discover_tests(k_expr=s["filter"].strip() or None, module_substr=s["module"].strip() or None)
                     s["collected"] = nodeids
                     # keep only still valid selections
                     s["selected"] = set([nid for nid in s["selected"] if nid in nodeids])
@@ -272,17 +270,16 @@ with tabs[3]:
         if run_clicked and s["status"] != "running":
             s["status"] = "running"
             with st.spinner("Running tests..."):
-                res = _devtools.run_tests(nodeids=sorted(s["selected"]) if s["selected"] else None,
+                res = _dshared.run_tests(nodeids=sorted(s["selected"]) if s["selected"] else None,
                                           k_expr=s["filter"].strip() or None,
                                           module_substr=s["module"].strip() or None)
-            s["stdout"], s["stderr"], s["status"] = res.stdout, res.stderr, res.status
+            s["stdout"], s["stderr"], s["status"] = res["stdout"], res["stderr"], res["status"]
 
         with st.expander("Test Output", expanded=True):
             st.code(s["stdout"] or "(empty)")
             if s["stdout"]:
-                summary = _devtools.parse_summary(s["stdout"])
-                if summary["passed"] or summary["failed"]:
-                    st.markdown(f"**Summary:** ✅ {summary['passed']} | ❌ {summary['failed']}")
+                if res["passed"] or res["failed"]:
+                    st.markdown(f"**Summary:** ✅ {res['passed']} | ❌ {res['failed']}")
         if s["stderr"]:
             with st.expander("Errors/StdErr"):
                 st.code(s["stderr"])
@@ -300,8 +297,8 @@ with tabs[3]:
         if lint_clicked:
             ls["running"] = True
             with st.spinner("Linting..."):
-                report = _linttools.run_lint()
-            ls["report"] = report.to_dict()
+                report = _dshared.run_lint()
+            ls["report"] = report
             ls["running"] = False
         if ls.get("report"):
             rep = ls["report"]
@@ -316,35 +313,58 @@ with tabs[3]:
         if "bench_state" not in st.session_state:
             st.session_state.bench_state = {"report": None, "target": "aggregate_metrics", "repeat": 3}
         bs = st.session_state.bench_state
-        reg = _benchtools.get_registry()
-        bs["target"] = st.selectbox("Target", list(reg.keys()), index=list(reg.keys()).index(bs["target"]) if bs["target"] in reg else 0, help="Registered benchmark target")
-        bs["repeat"] = st.number_input("Repeat", min_value=1, max_value=20, value=bs["repeat"], step=1)
-        if st.button("Run Benchmark"):
-            res = _benchtools.run_benchmark(bs["target"], repeat=int(bs["repeat"]))
-            bs["report"] = res.to_dict()
-        if bs.get("report"):
-            r = bs["report"]
-            st.json(r)
-            if r.get("delta_pct") is not None:
-                delta = r["delta_pct"]
-                st.markdown(f"Delta vs baseline: {delta:+.2f}% {'(faster)' if r.get('faster') else '(slower)' if delta else ''}")
+        reg = _dshared.list_benchmarks()
+        if reg:
+            bs["target"] = st.selectbox(
+                "Target",
+                list(reg.keys()),
+                index=list(reg.keys()).index(bs["target"]) if bs["target"] in reg else 0,
+                help="Registered benchmark target",
+            )
+            bs["repeat"] = st.number_input("Repeat", min_value=1, max_value=20, value=bs["repeat"], step=1)
+            if st.button("Run Benchmark"):
+                res = _dshared.run_benchmark(bs["target"], repeat=int(bs["repeat"]))
+                bs["report"] = res
+            if bs.get("report"):
+                r = bs["report"]
+                st.json(r)
+                if r.get("delta_pct") is not None:
+                    delta = r["delta_pct"]
+                    st.markdown(
+                        f"Delta vs baseline: {delta:+.2f}% {'(faster)' if r.get('faster') else '(slower)' if delta else ''}"
+                    )
+        else:
+            st.info("No benchmark targets registered")
         st.caption("Benchmarks lokal & deterministisch (sample trades)")
         # Snapshot Regression Panel
         st.markdown("---")
         st.subheader("Snapshots (Regression)")
-        from app.core import snapshots as _snap
         if "snapshot_state" not in st.session_state:
             st.session_state.snapshot_state = {"target": "metrics", "result": None, "update": False}
         ss = st.session_state.snapshot_state
         ss["target"] = st.selectbox("Snapshot Target", ["metrics", "equity_curve"], index=["metrics", "equity_curve"].index(ss["target"]))
         ss["update"] = st.checkbox("Update Baseline if Diff", value=ss.get("update", False))
         if st.button("Run Snapshot"):
-            res = _snap.ensure_and_diff(ss["target"], update=ss["update"])
-            ss["result"] = res.to_dict()
+            res = _dshared.snapshot(ss["target"], update=ss["update"])
+            ss["result"] = res
         if ss.get("result"):
-            st.json(ss["result"])
-            if ss["result"].get("status") == "diff":
+            res = ss["result"]
+            summary = res.get("summary") if isinstance(res, dict) else None
+            if summary:
+                st.markdown(
+                    f"Status: **{summary['status']}** | Diff Count: {summary['diff_count']} | Updated: {summary['updated']}"
+                )
+            st.json(res)
+            if res.get("status") == "diff":
                 st.warning("Differences detected — review before updating baseline.")
+            nd = res.get("numeric_deltas") if isinstance(res, dict) else None
+            if nd:
+                try:
+                    import pandas as pd
+                    st.markdown("**Numeric Deltas**")
+                    st.dataframe(pd.DataFrame(nd))
+                except Exception:
+                    st.caption("(numeric deltas table unavailable)")
         st.caption("Snapshots verwenden deterministische Sample Trades; Baselines unter data/devtools/snapshots/")
 
 with tabs[4]:
