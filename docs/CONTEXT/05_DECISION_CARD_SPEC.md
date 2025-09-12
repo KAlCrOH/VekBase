@@ -10,6 +10,6 @@
   "risks": ["Rate shock", "Supply constraints"],
   "confidence": 0.0-1.0
 }
-  Status: TEIL-IMPLEMENTIERT: Dataclass (`core/decision_card.py`) enthält aktuell NUR Basisfelder (card_id, created_at, author, title, context_refs, assumptions, options, decision, rationale, metrics_snapshot). Fehlend: action{type,target_w,ttl_days}, risks, confidence. `maxdd` Ziel: Equity Curve (heute nur realized Variante). → Backlog P0 DecisionCard Feld-Divergenz.
+  Status: AKTUALISIERT (prompt3_roadmap_implement): Dataclass (`core/decision_card.py`) enthält jetzt zusätzliche Felder `action{type,target_w,ttl_days}`, `risks`, `confidence` mit Validierung (type ∈ hold|add|trim|exit; confidence ∈ [0,1]). Backlog-Item Feld-Divergenz erledigt.
 
-Backlog: DecisionCard Feld-Divergenz (#2) — siehe tmp_backlogCollection.md
+Backlog (Update): Entfernt DecisionCard Feld-Divergenz (#2) – verbleibend: Equity Curve unrealized / Patterns.

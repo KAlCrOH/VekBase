@@ -32,10 +32,10 @@
 import streamlit as st
 from pathlib import Path
 from datetime import datetime, timedelta
-import io, csv, subprocess, sys
+import io, csv, subprocess, sys, json, re
 from app.core.trade_repo import TradeRepository
 from app.core.trade_model import validate_trade_dict, TradeValidationError
-from app.analytics.metrics import aggregate_metrics, realized_equity_curve
+from app.analytics.metrics import aggregate_metrics, realized_equity_curve, realized_equity_curve_with_unrealized
 from app.sim.simple_walk import run_and_persist, momentum_rule
 
 st.set_page_config(page_title="VekBase Console", layout="wide")
@@ -58,7 +58,7 @@ if trades_path.exists():
 else:
     st.info("No trades.csv yet. Add trades via the form below and click Save.")
 
-tabs = st.tabs(["Trades", "Analytics", "Simulation", "DevTools"])
+tabs = st.tabs(["Trades", "Analytics", "Simulation", "DevTools", "Retrieval"])
 
 # Trades Tab
 with tabs[0]:
@@ -104,15 +104,37 @@ with tabs[0]:
 
 # Analytics Tab
 with tabs[1]:
-    st.subheader("Analytics (Realized)")
+    st.subheader("Analytics (Realized / Unrealized Overlay)")
     if repo.all():
-        metrics = aggregate_metrics(repo.all())
+        # Inputs for optional mark prices
+        with st.expander("Optional Mark Prices (JSON)", expanded=False):
+            mp_text = st.text_area("mark_prices JSON", value="", height=80, help='Format: {"TICKER": price, ...}')
+            overlay = st.checkbox("Show Unrealized Overlay", value=False, help="Adds final point including unrealized PnL if open positions.")
+        mark_prices = None
+        if mp_text.strip():
+            try:
+                mark_prices = json.loads(mp_text)
+                if not isinstance(mark_prices, dict):
+                    st.warning("mark_prices must be a JSON object {ticker: price}")
+                    mark_prices = None
+            except Exception as e:
+                st.error(f"JSON parse error: {e}")
+        metrics = aggregate_metrics(repo.all(), mark_prices=mark_prices) if mark_prices else aggregate_metrics(repo.all())
         st.json(metrics)
         curve = realized_equity_curve(repo.all())
+        import pandas as pd
         if curve:
-            import pandas as pd
-            df = pd.DataFrame(curve, columns=["ts", "equity"])
-            st.line_chart(df.set_index("ts"))
+            df = pd.DataFrame(curve, columns=["ts", "equity_realized"])
+            if overlay and mark_prices:
+                ext = realized_equity_curve_with_unrealized(repo.all(), mark_prices=mark_prices)
+                if len(ext) > len(curve):
+                    df2 = pd.DataFrame(ext, columns=["ts", "equity_unrealized_total"])
+                    chart_df = df.merge(df2, on="ts", how="outer").set_index("ts").sort_index()
+                    st.line_chart(chart_df)
+                else:
+                    st.line_chart(df.set_index("ts"))
+            else:
+                st.line_chart(df.set_index("ts"))
     else:
         st.info("Keine Trades geladen.")
 
@@ -159,7 +181,7 @@ with tabs[2]:
                     df = pd.read_csv(equity_file)
                     st.line_chart(df.set_index('ts'))
 
-# DevTools Tab (simple synchronous runner with filter)
+# DevTools Tab (extended test runner: discovery + filter + selection)
 with tabs[3]:
     st.subheader("DevTools — Test Runner")
     if "test_run_state" not in st.session_state:
@@ -169,38 +191,120 @@ with tabs[3]:
             "stderr": "",
             "returncode": None,
             "filter": "",
+            "collected": [],  # list of test nodeids
+            "selected": set(),  # chosen nodeids
         }
-    col_a, col_b = st.columns([3,1])
+    state = st.session_state.test_run_state
+    col_a, col_b, col_c = st.columns([3,1,1])
     with col_a:
-        st.session_state.test_run_state["filter"] = st.text_input("Pytest -k Filter (optional)", st.session_state.test_run_state["filter"])
+        state["filter"] = st.text_input("Pytest -k Filter (expr)", state["filter"], help="Substring expression passed to -k (AND/OR supported)")
     with col_b:
-        status = st.session_state.test_run_state["status"]
-        st.markdown(f"**Status:** {status}")
+        module_filter = st.text_input("Module (tests/...)", value="", help="Optional path substring e.g. test_metrics")
+    with col_c:
+        status = state["status"]
+        badge_color = {"idle":"grey","running":"orange","passed":"green","failed":"red"}.get(status,"grey")
+        st.markdown(f"Status:<br><span style='color:{badge_color};font-weight:bold'>{status}</span>", unsafe_allow_html=True)
 
-    run_clicked = st.button("Run Tests")
-    if run_clicked and st.session_state.test_run_state["status"] != "running":
-        st.session_state.test_run_state["status"] = "running"
+    disc_col, run_col, sel_col = st.columns([1,1,2])
+    with disc_col:
+        if st.button("Discover"):
+            # collect tests
+            try:
+                collect_args = [sys.executable, "-m", "pytest", "--collect-only", "-q"]
+                flt = state["filter"].strip()
+                if flt:
+                    collect_args.extend(["-k", flt])
+                if module_filter.strip():
+                    collect_args.append(module_filter.strip())
+                result = subprocess.run(collect_args, capture_output=True, text=True, timeout=120)
+                # Parse nodeids from output lines (pytest -q --collect-only prints them one per line typically)
+                lines = [ln.strip() for ln in (result.stdout or "").splitlines() if ln.strip()]
+                # Filter out summary lines (which contain 'collected')
+                nodeids = [ln for ln in lines if not re.search(r"collected \\d+ items", ln)]
+                state["collected"] = nodeids
+                # Preserve selection intersection only
+                state["selected"] = set([nid for nid in state["selected"] if nid in nodeids])
+                state["stdout"] = result.stdout
+                state["stderr"] = result.stderr
+            except Exception as e:
+                state["stderr"] = str(e)
+    with run_col:
+        run_clicked = st.button("Run All" if not state["selected"] else "Run Selected")
+    with sel_col:
+        if state["collected"]:
+            st.caption(f"Collected: {len(state['collected'])} tests")
+            # Multi-select via checkboxes (scrollable expander)
+            with st.expander("Select Individual Tests", expanded=False):
+                for nid in state["collected"]:
+                    checked = nid in state["selected"]
+                    new_val = st.checkbox(nid, value=checked, key=f"sel::{nid}")
+                    if new_val and not checked:
+                        state["selected"].add(nid)
+                    elif not new_val and checked:
+                        state["selected"].discard(nid)
+
+    if run_clicked and state["status"] != "running":
+        state["status"] = "running"
         args = [sys.executable, "-m", "pytest", "-q"]
-        flt = st.session_state.test_run_state["filter"].strip()
+        # If specific nodeids chosen, append them instead of filter usage
+        if state["selected"]:
+            args.extend(sorted(state["selected"]))
+        flt = state["filter"].strip()
         if flt:
-            args.extend(["-k", flt])
+            # Only add -k if no specific selection (selection has precedence)
+            if not state["selected"]:
+                args.extend(["-k", flt])
+        if module_filter.strip() and not state["selected"]:
+            args.append(module_filter.strip())
         with st.spinner("Running tests..."):
             try:
                 result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-                st.session_state.test_run_state["stdout"] = result.stdout or ""
-                st.session_state.test_run_state["stderr"] = result.stderr or ""
-                st.session_state.test_run_state["returncode"] = result.returncode
-                st.session_state.test_run_state["status"] = "passed" if result.returncode == 0 else "failed"
+                state["stdout"] = result.stdout or ""
+                state["stderr"] = result.stderr or ""
+                state["returncode"] = result.returncode
+                state["status"] = "passed" if result.returncode == 0 else "failed"
             except Exception as e:
-                st.session_state.test_run_state["stderr"] = str(e)
-                st.session_state.test_run_state["status"] = "failed"
+                state["stderr"] = str(e)
+                state["status"] = "failed"
 
     # Output panels
     with st.expander("Test Output (stdout)", expanded=True):
-        st.code(st.session_state.test_run_state["stdout"] or "(empty)")
-    if st.session_state.test_run_state["stderr"]:
+        st.code(state["stdout"] or "(empty)")
+        # Quick summary: count passes/fails if -q output present
+        if state["stdout"]:
+            passed = len([ln for ln in state["stdout"].splitlines() if re.search(r"::(PASSED|SKIPPED)", ln, re.IGNORECASE)])
+            failed = len([ln for ln in state["stdout"].splitlines() if re.search(r"::(FAILED|ERROR)", ln, re.IGNORECASE)])
+            if passed or failed:
+                st.markdown(f"**Summary:** ✅ {passed} | ❌ {failed}")
+    if state["stderr"]:
         with st.expander("Errors/StdErr"):
-            st.code(st.session_state.test_run_state["stderr"])
+            st.code(state["stderr"])
     st.caption("Local only • No network • KISS")
+
+with tabs[4]:
+    st.subheader("Retrieval (Context Keyword)")
+    st.caption("Lokaler Keyword Retrieval über docs/CONTEXT – keine Embeddings")
+    from app.core.retrieval import retrieve as retrieve_ctx
+    query = st.text_input("Query", "projekt")
+    col_r1, col_r2, col_r3 = st.columns([2,1,1])
+    with col_r2:
+        ticker_filter = st.text_input("Ticker Filter (optional)", "")
+    with col_r3:
+        as_of_input = st.text_input("as_of (YYYY-MM-DD optional)", "")
+    limit = col_r1.number_input("Limit", min_value=1, max_value=10, value=3, step=1)
+    if st.button("Search", key="retrieval_search"):
+        as_of_val = as_of_input.strip() or None
+        if as_of_val:
+            try:
+                # simple validation
+                datetime.fromisoformat(as_of_val)
+            except Exception:
+                st.error("Ungültiges as_of Format")
+                as_of_val = None
+        res = retrieve_ctx(query, limit=limit, ticker=(ticker_filter.strip() or None), as_of=as_of_val)
+        if not res:
+            st.info("Keine Treffer.")
+        else:
+            st.dataframe(res)
 
 st.caption("Frontend-first Konsole • Personal Use • KISS")

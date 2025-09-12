@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from typing import List, Tuple, Callable, Dict, Any
 import hashlib
 import random
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 import json
 import csv
@@ -93,7 +93,7 @@ def run_and_persist(prices: List[Tuple[datetime, float]], rule: Callable[[List[T
     """
     results_dir.mkdir(parents=True, exist_ok=True)
     res = run_sim(prices, rule, seed=seed, **kwargs)
-    ts_label = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    ts_label = datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')
     folder = results_dir / f"{ts_label}_{res.meta['hash']}"
     folder.mkdir(parents=True, exist_ok=True)
     # meta

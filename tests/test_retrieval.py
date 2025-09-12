@@ -21,6 +21,7 @@
 # ============================================================
 """
 from app.core import retrieval
+from datetime import date
 
 
 def test_retrieval_keyword():
@@ -31,3 +32,21 @@ def test_retrieval_keyword():
     assert isinstance(res, list)
     if res:
         assert 'file' in res[0]
+
+
+def test_retrieval_with_ticker_filter_no_match():
+    files = retrieval.list_context_files()
+    if not files:
+        return
+    res = retrieval.retrieve('projekt', ticker='NONEXISTENTTICKER')
+    # Should be empty because ticker substring not in docs
+    assert res == []
+
+
+def test_retrieval_with_as_of_filter():
+    files = retrieval.list_context_files()
+    if not files:
+        return
+    # Using today's date ensures existing context files (with any earlier iso date mentions) pass heuristic
+    res = retrieval.retrieve('projekt', as_of=date.today())
+    assert isinstance(res, list)

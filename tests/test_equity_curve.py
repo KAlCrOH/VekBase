@@ -20,7 +20,7 @@
 #   Banner policy-relevant
 # ============================================================
 """
-from app.analytics.metrics import realized_equity_curve, aggregate_metrics
+from app.analytics.metrics import realized_equity_curve, aggregate_metrics, realized_equity_curve_with_unrealized
 from app.core.trade_model import validate_trade_dict
 from app.core.trade_repo import TradeRepository
 
@@ -39,3 +39,34 @@ def test_realized_equity_curve_progresses():
     assert len(curve) == 1
     ts, val = curve[0]
     assert val > 0
+
+
+def test_equity_curve_with_unrealized_append_point():
+    repo = TradeRepository()
+    rows = [
+        {"trade_id": "b1", "ts": "2024-01-01T09:00:00", "ticker": "BBB", "action": "BUY", "shares": 5, "price": 10, "fees": 0},
+        {"trade_id": "s1", "ts": "2024-01-02T09:00:00", "ticker": "BBB", "action": "SELL", "shares": 2, "price": 12, "fees": 0},
+    ]
+    for r in rows:
+        repo.add_trade(validate_trade_dict(r))
+    # After 1 partial sell, realized curve length 1; open position remains 3 shares.
+    base = realized_equity_curve(repo.all())
+    assert len(base) == 1
+    curve_ext = realized_equity_curve_with_unrealized(repo.all(), mark_prices={"BBB": 13})
+    # Should add an extra point (final unrealized) because open shares exist.
+    assert len(curve_ext) == 2
+    # Second point equity should be > first point
+    assert curve_ext[1][1] > curve_ext[0][1]
+
+
+def test_equity_curve_with_unrealized_no_mark_prices():
+    repo = TradeRepository()
+    rows = [
+        {"trade_id": "b1", "ts": "2024-01-01T09:00:00", "ticker": "CCC", "action": "BUY", "shares": 4, "price": 5, "fees": 0},
+        {"trade_id": "s1", "ts": "2024-01-01T10:00:00", "ticker": "CCC", "action": "SELL", "shares": 2, "price": 6, "fees": 0},
+    ]
+    for r in rows:
+        repo.add_trade(validate_trade_dict(r))
+    base = realized_equity_curve(repo.all())
+    ext = realized_equity_curve_with_unrealized(repo.all())
+    assert base == ext  # no mark prices so no extension

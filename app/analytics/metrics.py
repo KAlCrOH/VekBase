@@ -27,7 +27,7 @@
 # ============================================================
 from __future__ import annotations
 from typing import List, Dict, Tuple
-from datetime import datetime
+from datetime import datetime, UTC
 from dataclasses import dataclass
 from ..core.trade_model import Trade
 from math import pow
@@ -37,6 +37,7 @@ class TradePNL:
     trade: Trade
     realized_pnl: float
     fees: float
+    cost_basis: float  # Summe der ursprünglichen Kosten (für realisierten Anteil) – für CAGR Ableitung bei Einzel-Sell
 
 def compute_realized_pnl(trades: List[Trade]) -> Tuple[List[TradePNL], float]:
     """FIFO matching within each ticker. Returns list of per-trade realized pnl (only for SELL trades) and total pnl.
@@ -52,11 +53,13 @@ def compute_realized_pnl(trades: List[Trade]) -> Tuple[List[TradePNL], float]:
             inv = by_ticker.get(t.ticker, [])
             remaining = t.shares
             realized = 0.0
+            cost_basis = 0.0
             i = 0
             while remaining > 1e-12 and i < len(inv):
                 lot_shares, lot_price = inv[i]
                 take = min(lot_shares, remaining)
                 realized += (t.price - lot_price) * take
+                cost_basis += lot_price * take
                 lot_shares -= take
                 remaining -= take
                 if lot_shares <= 1e-12:
@@ -65,7 +68,7 @@ def compute_realized_pnl(trades: List[Trade]) -> Tuple[List[TradePNL], float]:
                     inv[i] = (lot_shares, lot_price)
                     i += 1
             total += realized - t.fees
-            out.append(TradePNL(trade=t, realized_pnl=realized - t.fees, fees=t.fees))
+            out.append(TradePNL(trade=t, realized_pnl=realized - t.fees, fees=t.fees, cost_basis=cost_basis))
     return out, total
 
 def _cumulative(values: List[float]) -> List[float]:
@@ -162,7 +165,10 @@ def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None 
                 unrealized += (mp - lot_price) * lot_sh
 
     avg_holding_duration = (sum(closed_durations) / len(closed_durations)) if closed_durations else 0.0
-    now_ts = now or (max((t.ts for t in trades), default=datetime.utcnow()))
+    now_ts = now or (max((t.ts for t in trades), default=datetime.now(UTC)))
+    # Normalize to UTC aware if naive (assume naive timestamps are UTC-based input)
+    if now_ts.tzinfo is None:
+        now_ts = now_ts.replace(tzinfo=UTC)
     open_positions = sum(lot_sh for lots in inv.values() for lot_sh, _, _ in lots)
     result = {
         "trades_total": len(trades),
@@ -180,7 +186,40 @@ def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None 
     }
     # CAGR nur wenn ausreichend realisierte Kurve existiert
     realized_curve = realized_equity_curve(trades)
-    result["cagr"] = _cagr_from_curve(realized_curve) if realized_curve else 0.0
+    # Standardfall: >=2 Punkte -> klassischer CAGR über Equity Kurve (realized PnL kumulativ)
+    if len(realized_curve) >= 2:
+        result["cagr"] = _cagr_from_curve(realized_curve)
+    elif len(realized_curve) == 1 and sells:
+        # Spezialfall: Nur ein realisierter Punkt (ein SELL). Verwende Kostenbasis des SELL zur Bestimmung eines Startkapitals.
+        single_ts, single_equity = realized_curve[0]
+        # Finde zugehörigen SELL Eintrag (gleiche ts) – falls mehrere an dem Tag, nimm ersten Match
+        sell_entry = next((p for p in sells if p.trade.ts == single_ts), None)
+        if sell_entry and sell_entry.cost_basis > 0 and single_equity > 0:
+            start_ts = min((t.ts for t in trades), default=single_ts)
+            if single_ts > start_ts:
+                delta_days = (single_ts - start_ts).total_seconds() / 86400.0
+                if delta_days > 0:
+                    years = delta_days / 365.0
+                    if years > 0:
+                        # multiple = (cost_basis + realized_pnl) / cost_basis
+                        multiple = (sell_entry.cost_basis + sell_entry.realized_pnl) / sell_entry.cost_basis
+                        if multiple > 0:
+                            try:
+                                result["cagr"] = pow(multiple, 1/years) - 1
+                            except Exception:
+                                result["cagr"] = 0.0
+                        else:
+                            result["cagr"] = 0.0
+                    else:
+                        result["cagr"] = 0.0
+                else:
+                    result["cagr"] = 0.0
+            else:
+                result["cagr"] = 0.0
+        else:
+            result["cagr"] = 0.0
+    else:
+        result["cagr"] = 0.0
     return result
 
 def realized_equity_curve(trades: List[Trade], start_equity: float = 0.0) -> List[Tuple]:
@@ -194,3 +233,30 @@ def realized_equity_curve(trades: List[Trade], start_equity: float = 0.0) -> Lis
         acc += entry.realized_pnl
         curve.append((entry.trade.ts, acc))
     return curve
+
+
+def realized_equity_curve_with_unrealized(  # non-breaking new helper
+    trades: List[Trade],
+    mark_prices: Dict[str, float] | None = None,
+    now: datetime | None = None,
+    start_equity: float = 0.0,
+) -> List[Tuple[datetime, float]]:
+    """Return realized equity curve optionally extended by a final point including unrealized PnL.
+    Behavior:
+      - If no mark_prices provided or no open positions -> identical to realized_equity_curve.
+      - If open positions AND mark_prices -> append (now_ts, realized_equity + unrealized_pnl).
+    Deterministic given inputs.
+    """
+    base_curve = realized_equity_curve(trades, start_equity=start_equity)
+    if not mark_prices:
+        return base_curve
+    # Reuse aggregation logic (single pass) for unrealized calculation
+    metrics = aggregate_metrics(trades, mark_prices=mark_prices, now=now)
+    unreal = metrics.get("unrealized_pnl", 0.0)
+    if unreal == 0:
+        return base_curve
+    realized_val = base_curve[-1][1] if base_curve else 0.0
+    ts_now = datetime.fromisoformat(metrics["timestamp_now"]) if "timestamp_now" in metrics else (now or datetime.now(UTC))
+    extended = list(base_curve)
+    extended.append((ts_now, realized_val + unreal))
+    return extended
