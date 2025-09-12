@@ -31,6 +31,7 @@ from app.core import devtools as _dev
 from app.core import linttools as _lint
 from app.core import benchtools as _bench
 from app.core import snapshots as _snap
+from app.core import testqueue as _tq  # queued test runner (parallel/persistent)
 
 
 def run_test_subset(k_expr: Optional[str] = None, max_tests: int = 10) -> Dict[str, Any]:
@@ -99,4 +100,37 @@ __all__ = [
     "list_benchmarks",
     "list_snapshot_targets",
     "run_snapshot",
+    # queue api
+    "submit_test_run","get_test_run","list_test_runs","process_test_queue","ensure_testqueue_workers","get_test_run_output","retry_test_run",
 ]
+
+
+# --- Increment: Queued Test Runner (prompt3_roadmap_implement) ---
+def submit_test_run(k_expr: str | None = None, module_substr: str | None = None) -> str:
+    return _tq.submit_run(k_expr=k_expr, module_substr=module_substr)
+
+
+def get_test_run(run_id: str):
+    return _tq.get_status(run_id)
+
+
+def list_test_runs(limit: int = 20, status: list[str] | None = None, include_persisted: bool = True):
+    # Legacy tick (still supports non-worker mode); in worker mode active runs progress asynchronously
+    _tq.process_next()
+    return _tq.list_runs(limit=limit, status=status, include_persisted=include_persisted)
+
+
+def process_test_queue():  # optional explicit tick
+    return _tq.process_next()
+
+
+def ensure_testqueue_workers():
+    return _tq.ensure_workers()
+
+
+def get_test_run_output(run_id: str):
+    return _tq.get_full_output(run_id)
+
+
+def retry_test_run(run_id: str):
+    return _tq.retry_run(run_id)

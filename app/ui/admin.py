@@ -27,8 +27,10 @@
 import streamlit as st
 from pathlib import Path
 from datetime import datetime
-from app.core.trade_repo import TradeRepository
-from app.analytics.metrics import aggregate_metrics
+
+# Direct imports (Bootstrap removed after packaging migration)
+from app.core.trade_repo import TradeRepository  # type: ignore
+from app.analytics.metrics import aggregate_metrics  # type: ignore
 
 def load_trades(repo: TradeRepository, path: Path):
     if path.exists():
@@ -67,7 +69,7 @@ if repo.all():
 # --- DevTools (Increment: prompt3_roadmap_implement Increment A) ---
 devtools_flag = bool(int(os.environ.get("VEK_ADMIN_DEVTOOLS", "1")))
 if devtools_flag:
-    from . import admin_devtools as _adm_dt  # local import after flag to keep startup cost minimal
+    from app.ui import admin_devtools as _adm_dt  # absolute import for script execution
     st.markdown("---")
     st.subheader("DevTools (Light)")
     if "adm_dt_state" not in st.session_state:
@@ -88,6 +90,90 @@ if devtools_flag:
         if last.get("stderr"):
             with st.expander("Errors/Stderr"):
                 st.code(last["stderr"])
+    # Queued Test Runner (Increment G phase 1)
+    with st.expander("Queued Test Runner", expanded=False):
+        if "adm_queue" not in st.session_state:
+            st.session_state.adm_queue = {"filter": "metrics", "runs": [], "last_id": None, "auto": True, "interval": 5, "last_poll": 0.0}
+        q = st.session_state.adm_queue
+        qc1, qc2, qc3, qc4, qc5 = st.columns([3,1,1,1,1])
+        with qc1:
+            q["filter"] = st.text_input("Queue -k Filter", q["filter"], key="adm_dt_qfilter")
+        with qc2:
+            if st.button("Queue Run", key="adm_dt_queue_submit"):
+                from app.ui import admin_devtools as _adm_dt
+                q["last_id"] = _adm_dt.submit_test_run(k_expr=q["filter"].strip() or None)
+        with qc3:
+            q["auto"] = st.checkbox("Auto", value=q.get("auto", True), help="Auto alle n Sekunden")
+        with qc4:
+            q["interval"] = st.number_input("Interval s", min_value=2, max_value=60, value=int(q.get("interval",5)), step=1, key="adm_dt_qint")
+        with qc5:
+            q["status_filter"] = st.multiselect("Status", ["queued","running","passed","failed","error"], default=q.get("status_filter",[]))
+        q["show_persisted"] = st.checkbox("Persisted", value=q.get("show_persisted", True), help="Include JSONL history")
+        # Manual refresh button
+        if st.button("Refresh Now", key="adm_dt_queue_refresh"):
+            from app.ui import admin_devtools as _adm_dt
+            q["runs"] = _adm_dt.list_test_runs(limit=25, status=q.get("status_filter") or None, include_persisted=q.get("show_persisted", True))
+            q["last_poll"] = _time.time()
+        # Auto refresh tick
+        import time as _time
+        now = _time.time()
+        if q.get("auto") and (now - q.get("last_poll",0) >= q.get("interval",5)):
+            from app.ui import admin_devtools as _adm_dt
+            q["runs"] = _adm_dt.list_test_runs(limit=25, status=q.get("status_filter") or None, include_persisted=q.get("show_persisted", True))
+            q["last_poll"] = now
+            # Rerun hint (Streamlit will rerun automatically after widget interactions)
+        if q.get("runs"):
+            # Add derived column duration_s if not present
+            rows = q["runs"]
+            try:
+                import pandas as pd
+                df = pd.DataFrame(rows)
+                # Show key columns subset if large
+                display_cols = [c for c in ["run_id","status","passed","failed","duration_s","queued_at","started_at","finished_at","stdout_truncated","stderr_truncated"] if c in df.columns]
+                st.dataframe(df[display_cols])
+            except Exception:
+                st.json(rows)
+            exp_c1, exp_c2, exp_c3 = st.columns([1,1,1])
+            with exp_c1:
+                if st.button("Export JSON", key="adm_dt_queue_export_json"):
+                    import json as _json
+                    st.download_button("Download JSON", data=_json.dumps(rows, ensure_ascii=False, indent=2), file_name="testqueue_runs.json")
+            with exp_c2:
+                if st.button("Export CSV", key="adm_dt_queue_export_csv"):
+                    import csv, io
+                    if rows:
+                        buf = io.StringIO()
+                        writer = csv.DictWriter(buf, fieldnames=sorted({k for r in rows for k in r.keys()}))
+                        writer.writeheader()
+                        for r in rows:
+                            writer.writerow(r)
+                        st.download_button("Download CSV", data=buf.getvalue(), file_name="testqueue_runs.csv")
+            with exp_c3:
+                if q.get("last_id"):
+                    from app.ui import admin_devtools as _adm_dt
+                    if st.button("Full Output", key="adm_dt_full_output"):
+                        full = _adm_dt.get_test_run_output(q["last_id"])
+                        if full:
+                            st.code(full["stdout"] or "(empty)")
+                            if full.get("stderr"):
+                                st.code(full["stderr"], language="text")
+                            st.caption(full.get("note",""))
+                    if st.button("Retry Last", key="adm_dt_retry_last"):
+                        new_id = _adm_dt.retry_test_run(q["last_id"])
+                        if new_id:
+                            q["last_id"] = new_id
+                    # Single Run Export
+                    if st.button("Last JSON", key="adm_dt_last_json"):
+                        import json as _json
+                        rid = q["last_id"]
+                        st.download_button(
+                            "Download Last JSON",
+                            data=_json.dumps(_adm_dt.get_test_run(rid), ensure_ascii=False, indent=2),
+                            file_name=f"testqueue_run_{rid}.json",
+                        )
+        if q.get("last_id"):
+            from app.ui import admin_devtools as _adm_dt
+            st.caption(f"Letzte Run ID: {q['last_id']} | Status: {_adm_dt.get_test_run(q['last_id'])['status'] if _adm_dt.get_test_run(q['last_id']) else 'n/a'}")
     # Lint
     col_l1, col_l2 = st.columns([1,4])
     with col_l1:
@@ -169,7 +255,7 @@ if devtools_flag:
     st.subheader("Retrieval (Context)")
     retrieval_flag = bool(int(os.environ.get("VEK_RETRIEVAL", "1")))
     if retrieval_flag:
-        from . import admin_feature_wrappers as _feat
+        from app.ui import admin_feature_wrappers as _feat
         if "adm_retr" not in st.session_state:
             st.session_state.adm_retr = {"query": "projekt", "limit": 3, "ticker": "", "as_of": "", "results": []}
         r = st.session_state.adm_retr
@@ -196,7 +282,7 @@ if devtools_flag:
     st.subheader("DecisionCards")
     dc_flag = bool(int(os.environ.get("VEK_DECISIONCARDS", "1")))
     if dc_flag:
-        from . import admin_feature_wrappers as _feat
+        from app.ui import admin_feature_wrappers as _feat
         if "adm_dc" not in st.session_state:
             st.session_state.adm_dc = {"list": [], "card": {"title": "", "author": "me", "id": "dc_admin_1"}}
         dcs = st.session_state.adm_dc

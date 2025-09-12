@@ -1,5 +1,7 @@
 # VekBase — Personal Investor Workbench (MVP Scaffold)
 
+![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg) <!-- Replace OWNER/REPO nach GitHub Push -->
+
 ## Leitlinien (aus CONTEXT)
 - Klarheit vor Cleverness; reine Funktionen bevorzugt; UI bleibt dünn (`app/ui` nur Darstellung).
 - Tradeschema (`trades.csv`):
@@ -22,22 +24,43 @@
 - `tests/`: 10+ Pytests (Model, Repo Roundtrip, Analytics, Equity Curve, Simulation, Persistenz, DecisionCard, Retrieval).
 
 ## Setup (lokal)
+Variante A (klassisch `requirements.txt`):
 ```
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+Variante B (neu: Packaging via `pyproject.toml`, editable):
+```
+python -m venv .venv
+.venv\Scripts\activate
+pip install -U pip
+pip install -e .[dev]
+```
+Damit ist das Paket `vekbase` (Namespace `app`) importierbar ohne Bootstrap.
+
 ## Start (Frontend Zentrale)
+Editable Install vorausgesetzt (oder Variante A mit Root als CWD):
 ```
 streamlit run app/ui/console.py
 ```
+
+Admin (Legacy) Ansicht:
+```
+streamlit run app/ui/admin.py
+```
+
+Falls vor editable Installation ausgeführt, sorgt Bootstrap in den UI-Skripten für `sys.path` Anpassung.
 
 ## Nächste Schritte
 1. Optionale Pattern-Analytics (Histogramme, Scatter) & erweiterte Metriken (CAGR etc.).
 2. Ausbau Simulation Parameter (TP/SL, Kostenmodell) + Snapshot Tests.
 3. DecisionCard UI Integration + Retrieval Panel.
 4. (Optional) Live Quotes Feed (lokal Mock) für fortlaufende unrealized Updates.
+
+## CI
+Automatischer Lauf von `pytest -q` über GitHub Actions (`.github/workflows/ci.yml`). Artefakte: `data/devtools/**` (Queue Logs / Snapshots) werden bei jedem Run (immer) hochgeladen. Badge oben aktualisieren nach GitHub Repository Import (`OWNER/REPO` ersetzen).
 
 ## Lizenz
 Persönliche Nutzung (nicht für Enterprise).

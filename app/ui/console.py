@@ -33,10 +33,12 @@ import streamlit as st
 from pathlib import Path
 from datetime import datetime, timedelta
 import io, csv, subprocess, sys, json, re, os
-from app.core.trade_repo import TradeRepository
-from app.core.trade_model import validate_trade_dict, TradeValidationError
-from app.analytics.metrics import aggregate_metrics, realized_equity_curve, realized_equity_curve_with_unrealized
-from app.sim.simple_walk import run_and_persist, momentum_rule
+
+# Direct imports (Bootstrap removed after packaging migration)
+from app.core.trade_repo import TradeRepository  # type: ignore
+from app.core.trade_model import validate_trade_dict, TradeValidationError  # type: ignore
+from app.analytics.metrics import aggregate_metrics, realized_equity_curve, realized_equity_curve_with_unrealized  # type: ignore
+from app.sim.simple_walk import run_and_persist, momentum_rule  # type: ignore
 
 st.set_page_config(page_title="VekBase Console", layout="wide")
 
@@ -366,6 +368,83 @@ with tabs[3]:
                 except Exception:
                     st.caption("(numeric deltas table unavailable)")
         st.caption("Snapshots verwenden deterministische Sample Trades; Baselines unter data/devtools/snapshots/")
+        # Queued Test Runner Panel (Portierung aus Admin, Auto-Refresh)
+        st.markdown("---")
+        st.subheader("Queued Test Runner")
+        from app.ui import admin_devtools as _adm_dt
+        if "queue_state" not in st.session_state:
+            st.session_state.queue_state = {"filter": "metrics", "runs": [], "last_id": None, "auto": True, "interval": 5, "last_poll": 0.0}
+        qs = st.session_state.queue_state
+        qc1, qc2, qc3, qc4, qc5 = st.columns([3,1,1,1,1])
+        with qc1:
+            qs["filter"] = st.text_input("Queue -k Filter", qs["filter"], key="cons_q_filter")
+        with qc2:
+            if st.button("Queue Run", key="cons_q_submit"):
+                qs["last_id"] = _adm_dt.submit_test_run(k_expr=qs["filter"].strip() or None)
+        with qc3:
+            qs["auto"] = st.checkbox("Auto", value=qs.get("auto", True), key="cons_q_auto")
+        with qc4:
+            qs["interval"] = st.number_input("Interval s", min_value=2, max_value=60, value=int(qs.get("interval",5)), step=1, key="cons_q_int")
+        with qc5:
+            qs["status_filter"] = st.multiselect("Status", ["queued","running","passed","failed","error"], default=qs.get("status_filter",[]), key="cons_q_status")
+        qs["show_persisted"] = st.checkbox("Persisted", value=qs.get("show_persisted", True), key="cons_q_persisted")
+        if st.button("Refresh Now", key="cons_q_refresh"):
+            qs["runs"] = _adm_dt.list_test_runs(limit=25, status=qs.get("status_filter") or None, include_persisted=qs.get("show_persisted", True))
+            import time as _time
+            qs["last_poll"] = _time.time()
+        import time as _time
+        now_q = _time.time()
+        if qs.get("auto") and (now_q - qs.get("last_poll",0) >= qs.get("interval",5)):
+            qs["runs"] = _adm_dt.list_test_runs(limit=25, status=qs.get("status_filter") or None, include_persisted=qs.get("show_persisted", True))
+            qs["last_poll"] = now_q
+        if qs.get("runs"):
+            rows = qs["runs"]
+            try:
+                import pandas as pd
+                df = pd.DataFrame(rows)
+                cols = [c for c in ["run_id","status","passed","failed","duration_s","queued_at","started_at","finished_at","stdout_truncated","stderr_truncated"] if c in df.columns]
+                st.dataframe(df[cols])
+            except Exception:
+                st.json(rows)
+            ec1, ec2, ec3 = st.columns([1,1,1])
+            with ec1:
+                if st.button("Export JSON", key="cons_q_export_json"):
+                    import json as _json
+                    st.download_button("Download JSON", data=_json.dumps(rows, ensure_ascii=False, indent=2), file_name="testqueue_runs.json")
+            with ec2:
+                if st.button("Export CSV", key="cons_q_export_csv"):
+                    import csv, io
+                    if rows:
+                        buf = io.StringIO()
+                        writer = csv.DictWriter(buf, fieldnames=sorted({k for r in rows for k in r.keys()}))
+                        writer.writeheader()
+                        for r in rows:
+                            writer.writerow(r)
+                        st.download_button("Download CSV", data=buf.getvalue(), file_name="testqueue_runs.csv")
+            with ec3:
+                if qs.get("last_id"):
+                    from . import admin_devtools as _adm_dt
+                    if st.button("Full Output", key="cons_q_full_output"):
+                        full = _adm_dt.get_test_run_output(qs["last_id"])
+                        if full:
+                            st.code(full["stdout"] or "(empty)")
+                            if full.get("stderr"):
+                                st.code(full["stderr"], language="text")
+                            st.caption(full.get("note",""))
+                    if st.button("Retry Last", key="cons_q_retry_last"):
+                        new_id = _adm_dt.retry_test_run(qs["last_id"])
+                        if new_id:
+                            qs["last_id"] = new_id
+                    if st.button("Last JSON", key="cons_q_last_json"):
+                        import json as _json
+                        rid = qs["last_id"]
+                        st.download_button(
+                            "Download Last JSON",
+                            data=_json.dumps(_adm_dt.get_test_run(rid), ensure_ascii=False, indent=2),
+                            file_name=f"testqueue_run_{rid}.json",
+                        )
+        if qs.get("last_id"):
+            st.caption(f"Letzte Run ID: {qs['last_id']} | Status: {_adm_dt.get_test_run(qs['last_id'])['status'] if _adm_dt.get_test_run(qs['last_id']) else 'n/a'}")
 
 with tabs[4]:
     st.subheader("Retrieval (Context Keyword)")
