@@ -1,9 +1,14 @@
 VekBase/
 ├─ app/
-│  ├─ analytics/        # metrics.py (REALIZED Metrics + unrealized overlay helper), patterns.py (Histogram/Scatter Stubs)
+│  ├─ analytics/        # metrics.py (REALIZED Metrics + unrealized overlay helper), patterns.py (Histogram/Scatter Implementierung + UI Flag VEK_PATTERNS)
 │  ├─ core/             # trade_model, trade_repo, retrieval (Keyword Stub + ticker/as_of Filter), decision_card, (Simulation uses sim/)
 │  ├─ sim/              # simple_walk (deterministische Mini-Simulation + Persistenz)
 │  └─ ui/               # console.py (Streamlit Konsole: Trades, Analytics, Simulation, DevTools)
+│  (NEW) core/devtools.py    # Test Discovery & Runner Abstraktion (UI nutzt öffentliche Funktionen)
+│  (NEW) core/linttools.py   # Lightweight Lint (Syntax, Whitespace, Mixed Indent) ohne externe Abhängigkeiten
+│  (NEW) core/benchtools.py  # Einfache Benchmark Harness (Median ms + Baseline Persistenz) für ausgewählte Analytics
+│  (NEW) core/snapshots.py   # Snapshot Regression Harness (metrics & equity_curve) + Diff + Baseline Update
+│  (NEW) core/decision_card_repo.py # JSON Persistenz für DecisionCards (data/decision_cards.json)
 ├─ data/                # (lokal, nicht versioniert erwartet) trades.csv, results/, optional notes/, cache/
 ├─ docs/
 │  ├─ CONTEXT/          # 10 Kontext-Dateien (Charter, Manifesto, Glossary, Schema, Decision Spec, RAG Policy, Test Strategy, UI Spec, Roadmap, Working Agreements)
@@ -15,7 +20,7 @@ VekBase/
 Not Implemented Yet (remaining backlog slice):
 - Embeddings / RAG (nur Keyword Retrieval vorhanden)
 - Erweiterte Sim Parameter (TP/SL/Kosten)
-- Snapshot Regression Harness
+- Live Quotes Cache
 
 Konventionen:
 - Keine sys.path Hacks (pytest.ini steuert Pfad)

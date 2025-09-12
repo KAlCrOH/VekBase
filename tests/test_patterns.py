@@ -53,3 +53,22 @@ def test_entry_return_scatter():
     for price, ret in pts:
         assert price > 0
         assert -1 < ret < 10  # sanity bound
+
+
+def test_empty_trades_patterns():
+    # Empty repository should yield zeroed histogram and empty scatter
+    from app.core.trade_repo import TradeRepository
+    empty_repo = TradeRepository()
+    hist = holding_duration_histogram(empty_repo.all(), bucket_minutes=15, max_buckets=4)
+    assert hist == [0,0,0,0]
+    pts = entry_return_scatter(empty_repo.all())
+    assert pts == []
+
+
+def test_invalid_bucket_size():
+    repo = build_repo()
+    try:
+        holding_duration_histogram(repo.all(), bucket_minutes=0)
+        assert False, "Expected ValueError for bucket_minutes=0"
+    except ValueError:
+        pass

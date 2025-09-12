@@ -32,7 +32,7 @@
 import streamlit as st
 from pathlib import Path
 from datetime import datetime, timedelta
-import io, csv, subprocess, sys, json, re
+import io, csv, subprocess, sys, json, re, os
 from app.core.trade_repo import TradeRepository
 from app.core.trade_model import validate_trade_dict, TradeValidationError
 from app.analytics.metrics import aggregate_metrics, realized_equity_curve, realized_equity_curve_with_unrealized
@@ -58,7 +58,17 @@ if trades_path.exists():
 else:
     st.info("No trades.csv yet. Add trades via the form below and click Save.")
 
-tabs = st.tabs(["Trades", "Analytics", "Simulation", "DevTools", "Retrieval"])
+devtools_enabled = bool(int(os.environ.get("VEK_DEVTOOLS", "1")))
+decision_cards_enabled = bool(int(os.environ.get("VEK_DECISIONCARDS", "1")))
+patterns_enabled = bool(int(os.environ.get("VEK_PATTERNS", "1")))
+tabs = st.tabs([
+    "Trades",
+    "Analytics",
+    "Simulation",
+    "DevTools" if devtools_enabled else "DevTools (disabled)",
+    "Retrieval",
+    "DecisionCards" if decision_cards_enabled else "DecisionCards (disabled)",
+])
 
 # Trades Tab
 with tabs[0]:
@@ -135,6 +145,30 @@ with tabs[1]:
                     st.line_chart(df.set_index("ts"))
             else:
                 st.line_chart(df.set_index("ts"))
+        # Pattern Analytics (Histogram + Scatter) behind feature flag
+        st.markdown("---")
+        st.subheader("Pattern Analytics (Holding Duration & Entry→Return)")
+        if not patterns_enabled:
+            st.info("Patterns disabled (VEK_PATTERNS=0)")
+        else:
+            from app.analytics.patterns import holding_duration_histogram, entry_return_scatter
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                bucket_minutes = st.number_input("Bucket Minutes", min_value=1, max_value=240, value=60, step=5, key="pat_bucket")
+                max_buckets = st.number_input("Max Buckets", min_value=1, max_value=20, value=10, step=1, key="pat_buckets")
+                hist = holding_duration_histogram(repo.all(), bucket_minutes=int(bucket_minutes), max_buckets=int(max_buckets))
+                st.caption("Holding Duration Histogram (bucket counts)")
+                import pandas as pd
+                dfh = pd.DataFrame({"bucket": list(range(len(hist))), "count": hist}).set_index("bucket")
+                st.bar_chart(dfh)
+            with col_p2:
+                pts = entry_return_scatter(repo.all())
+                if pts:
+                    import pandas as pd
+                    dfp = pd.DataFrame(pts, columns=["entry_price","return_pct"])
+                    st.scatter_chart(dfp, x="entry_price", y="return_pct")
+                else:
+                    st.info("No closed positions to plot.")
     else:
         st.info("Keine Trades geladen.")
 
@@ -181,105 +215,137 @@ with tabs[2]:
                     df = pd.read_csv(equity_file)
                     st.line_chart(df.set_index('ts'))
 
-# DevTools Tab (extended test runner: discovery + filter + selection)
+from app.core import devtools as _devtools  # lazy import after feature flag set
+from app.core import linttools as _linttools
+from app.core import benchtools as _benchtools
+
+# DevTools Tab (refactored to use app.core.devtools)
 with tabs[3]:
     st.subheader("DevTools — Test Runner")
-    if "test_run_state" not in st.session_state:
-        st.session_state.test_run_state = {
-            "status": "idle",  # idle|running|passed|failed
-            "stdout": "",
-            "stderr": "",
-            "returncode": None,
-            "filter": "",
-            "collected": [],  # list of test nodeids
-            "selected": set(),  # chosen nodeids
-        }
-    state = st.session_state.test_run_state
-    col_a, col_b, col_c = st.columns([3,1,1])
-    with col_a:
-        state["filter"] = st.text_input("Pytest -k Filter (expr)", state["filter"], help="Substring expression passed to -k (AND/OR supported)")
-    with col_b:
-        module_filter = st.text_input("Module (tests/...)", value="", help="Optional path substring e.g. test_metrics")
-    with col_c:
-        status = state["status"]
-        badge_color = {"idle":"grey","running":"orange","passed":"green","failed":"red"}.get(status,"grey")
-        st.markdown(f"Status:<br><span style='color:{badge_color};font-weight:bold'>{status}</span>", unsafe_allow_html=True)
+    if not devtools_enabled:
+        st.info("DevTools deaktiviert (VEK_DEVTOOLS=0). Setze Env Var um zu aktivieren.")
+    else:
+        if "dt_state" not in st.session_state:
+            st.session_state.dt_state = {
+                "status": "idle",  # idle|running|passed|failed|error
+                "stdout": "",
+                "stderr": "",
+                "filter": "",
+                "module": "",
+                "collected": [],
+                "selected": set(),
+            }
+        s = st.session_state.dt_state
+        c1, c2, c3 = st.columns([3,1,1])
+        with c1:
+            s["filter"] = st.text_input("Pytest -k Filter", s["filter"], help="Expression for -k (optional)")
+        with c2:
+            s["module"] = st.text_input("Module Substr", s["module"], help="e.g. test_metrics")
+        with c3:
+            badge_color = {"idle":"grey","running":"orange","passed":"green","failed":"red","error":"red"}.get(s["status"],"grey")
+            st.markdown(f"Status:<br><span style='color:{badge_color};font-weight:bold'>{s['status']}</span>", unsafe_allow_html=True)
 
-    disc_col, run_col, sel_col = st.columns([1,1,2])
-    with disc_col:
-        if st.button("Discover"):
-            # collect tests
-            try:
-                collect_args = [sys.executable, "-m", "pytest", "--collect-only", "-q"]
-                flt = state["filter"].strip()
-                if flt:
-                    collect_args.extend(["-k", flt])
-                if module_filter.strip():
-                    collect_args.append(module_filter.strip())
-                result = subprocess.run(collect_args, capture_output=True, text=True, timeout=120)
-                # Parse nodeids from output lines (pytest -q --collect-only prints them one per line typically)
-                lines = [ln.strip() for ln in (result.stdout or "").splitlines() if ln.strip()]
-                # Filter out summary lines (which contain 'collected')
-                nodeids = [ln for ln in lines if not re.search(r"collected \\d+ items", ln)]
-                state["collected"] = nodeids
-                # Preserve selection intersection only
-                state["selected"] = set([nid for nid in state["selected"] if nid in nodeids])
-                state["stdout"] = result.stdout
-                state["stderr"] = result.stderr
-            except Exception as e:
-                state["stderr"] = str(e)
-    with run_col:
-        run_clicked = st.button("Run All" if not state["selected"] else "Run Selected")
-    with sel_col:
-        if state["collected"]:
-            st.caption(f"Collected: {len(state['collected'])} tests")
-            # Multi-select via checkboxes (scrollable expander)
-            with st.expander("Select Individual Tests", expanded=False):
-                for nid in state["collected"]:
-                    checked = nid in state["selected"]
-                    new_val = st.checkbox(nid, value=checked, key=f"sel::{nid}")
-                    if new_val and not checked:
-                        state["selected"].add(nid)
-                    elif not new_val and checked:
-                        state["selected"].discard(nid)
+        col_d, col_r, col_sel = st.columns([1,1,2])
+        with col_d:
+            if st.button("Discover"):
+                try:
+                    nodeids = _devtools.discover_tests(k_expr=s["filter"].strip() or None, module_substr=s["module"].strip() or None)
+                    s["collected"] = nodeids
+                    # keep only still valid selections
+                    s["selected"] = set([nid for nid in s["selected"] if nid in nodeids])
+                except Exception as e:
+                    s["stderr"] = str(e)
+                    s["collected"] = []
+        with col_r:
+            run_clicked = st.button("Run Selected" if s["selected"] else "Run (Filter)")
+        with col_sel:
+            if s["collected"]:
+                st.caption(f"Collected: {len(s['collected'])}")
+                with st.expander("Select Tests", expanded=False):
+                    for nid in s["collected"]:
+                        chk = st.checkbox(nid, value=(nid in s["selected"]), key=f"dt::{nid}")
+                        if chk:
+                            s["selected"].add(nid)
+                        else:
+                            s["selected"].discard(nid)
 
-    if run_clicked and state["status"] != "running":
-        state["status"] = "running"
-        args = [sys.executable, "-m", "pytest", "-q"]
-        # If specific nodeids chosen, append them instead of filter usage
-        if state["selected"]:
-            args.extend(sorted(state["selected"]))
-        flt = state["filter"].strip()
-        if flt:
-            # Only add -k if no specific selection (selection has precedence)
-            if not state["selected"]:
-                args.extend(["-k", flt])
-        if module_filter.strip() and not state["selected"]:
-            args.append(module_filter.strip())
-        with st.spinner("Running tests..."):
-            try:
-                result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-                state["stdout"] = result.stdout or ""
-                state["stderr"] = result.stderr or ""
-                state["returncode"] = result.returncode
-                state["status"] = "passed" if result.returncode == 0 else "failed"
-            except Exception as e:
-                state["stderr"] = str(e)
-                state["status"] = "failed"
+        if run_clicked and s["status"] != "running":
+            s["status"] = "running"
+            with st.spinner("Running tests..."):
+                res = _devtools.run_tests(nodeids=sorted(s["selected"]) if s["selected"] else None,
+                                          k_expr=s["filter"].strip() or None,
+                                          module_substr=s["module"].strip() or None)
+            s["stdout"], s["stderr"], s["status"] = res.stdout, res.stderr, res.status
 
-    # Output panels
-    with st.expander("Test Output (stdout)", expanded=True):
-        st.code(state["stdout"] or "(empty)")
-        # Quick summary: count passes/fails if -q output present
-        if state["stdout"]:
-            passed = len([ln for ln in state["stdout"].splitlines() if re.search(r"::(PASSED|SKIPPED)", ln, re.IGNORECASE)])
-            failed = len([ln for ln in state["stdout"].splitlines() if re.search(r"::(FAILED|ERROR)", ln, re.IGNORECASE)])
-            if passed or failed:
-                st.markdown(f"**Summary:** ✅ {passed} | ❌ {failed}")
-    if state["stderr"]:
-        with st.expander("Errors/StdErr"):
-            st.code(state["stderr"])
-    st.caption("Local only • No network • KISS")
+        with st.expander("Test Output", expanded=True):
+            st.code(s["stdout"] or "(empty)")
+            if s["stdout"]:
+                summary = _devtools.parse_summary(s["stdout"])
+                if summary["passed"] or summary["failed"]:
+                    st.markdown(f"**Summary:** ✅ {summary['passed']} | ❌ {summary['failed']}")
+        if s["stderr"]:
+            with st.expander("Errors/StdErr"):
+                st.code(s["stderr"])
+        # Lint Panel
+        st.markdown("---")
+        st.subheader("Lint Checks (Lightweight)")
+        if "lint_state" not in st.session_state:
+            st.session_state.lint_state = {"running": False, "report": None}
+        ls = st.session_state.lint_state
+        col_l1, col_l2 = st.columns([1,3])
+        with col_l1:
+            lint_clicked = st.button("Run Lint", disabled=ls["running"], key="lint_run")
+        with col_l2:
+            st.caption("Prüft Syntax, trailing whitespace, mixed indentation (lokal)")
+        if lint_clicked:
+            ls["running"] = True
+            with st.spinner("Linting..."):
+                report = _linttools.run_lint()
+            ls["report"] = report.to_dict()
+            ls["running"] = False
+        if ls.get("report"):
+            rep = ls["report"]
+            st.markdown(f"**Issues:** {rep['total']} (Errors: {rep['errors']} / Warnings: {rep['warnings']})")
+            if rep['issues']:
+                import pandas as pd
+                st.dataframe(pd.DataFrame(rep['issues']))
+        st.caption("Local only • No network • KISS")
+        # Benchmark Panel
+        st.markdown("---")
+        st.subheader("Benchmarks (Median ms)")
+        if "bench_state" not in st.session_state:
+            st.session_state.bench_state = {"report": None, "target": "aggregate_metrics", "repeat": 3}
+        bs = st.session_state.bench_state
+        reg = _benchtools.get_registry()
+        bs["target"] = st.selectbox("Target", list(reg.keys()), index=list(reg.keys()).index(bs["target"]) if bs["target"] in reg else 0, help="Registered benchmark target")
+        bs["repeat"] = st.number_input("Repeat", min_value=1, max_value=20, value=bs["repeat"], step=1)
+        if st.button("Run Benchmark"):
+            res = _benchtools.run_benchmark(bs["target"], repeat=int(bs["repeat"]))
+            bs["report"] = res.to_dict()
+        if bs.get("report"):
+            r = bs["report"]
+            st.json(r)
+            if r.get("delta_pct") is not None:
+                delta = r["delta_pct"]
+                st.markdown(f"Delta vs baseline: {delta:+.2f}% {'(faster)' if r.get('faster') else '(slower)' if delta else ''}")
+        st.caption("Benchmarks lokal & deterministisch (sample trades)")
+        # Snapshot Regression Panel
+        st.markdown("---")
+        st.subheader("Snapshots (Regression)")
+        from app.core import snapshots as _snap
+        if "snapshot_state" not in st.session_state:
+            st.session_state.snapshot_state = {"target": "metrics", "result": None, "update": False}
+        ss = st.session_state.snapshot_state
+        ss["target"] = st.selectbox("Snapshot Target", ["metrics", "equity_curve"], index=["metrics", "equity_curve"].index(ss["target"]))
+        ss["update"] = st.checkbox("Update Baseline if Diff", value=ss.get("update", False))
+        if st.button("Run Snapshot"):
+            res = _snap.ensure_and_diff(ss["target"], update=ss["update"])
+            ss["result"] = res.to_dict()
+        if ss.get("result"):
+            st.json(ss["result"])
+            if ss["result"].get("status") == "diff":
+                st.warning("Differences detected — review before updating baseline.")
+        st.caption("Snapshots verwenden deterministische Sample Trades; Baselines unter data/devtools/snapshots/")
 
 with tabs[4]:
     st.subheader("Retrieval (Context Keyword)")
@@ -306,5 +372,51 @@ with tabs[4]:
             st.info("Keine Treffer.")
         else:
             st.dataframe(res)
+
+with tabs[5]:
+    st.subheader("DecisionCards")
+    if not decision_cards_enabled:
+        st.info("DecisionCards disabled (VEK_DECISIONCARDS=0)")
+    else:
+        from app.core.decision_card_repo import DecisionCardRepository
+        from app.core.decision_card import make_decision_card
+        repo_dc = DecisionCardRepository()
+        st.caption("Create & Review lightweight investment decision cards")
+        with st.expander("Create New Card", expanded=False):
+            with st.form("dc_form"):
+                c1, c2 = st.columns(2)
+                card_id = c1.text_input("card_id", value=f"dc_{len(repo_dc.all())+1}")
+                author = c2.text_input("author", value="me")
+                title = st.text_input("title")
+                assumptions = st.text_area("assumptions (one per line)", value="")
+                risks = st.text_area("risks (one per line)", value="")
+                action_type = st.selectbox("action.type", ["hold","add","trim","exit"], index=0)
+                action_target_w = st.number_input("action.target_w", min_value=0.0, value=0.0, step=0.01)
+                action_ttl = st.number_input("action.ttl_days", min_value=0, value=30, step=5)
+                confidence = st.slider("confidence", 0.0, 1.0, 0.5, 0.05)
+                create_clicked = st.form_submit_button("Create Card")
+            if create_clicked:
+                try:
+                    card = make_decision_card(
+                        card_id=card_id,
+                        author=author,
+                        title=title,
+                        assumptions=[ln.strip() for ln in assumptions.splitlines() if ln.strip()],
+                        risks=[ln.strip() for ln in risks.splitlines() if ln.strip()],
+                        action={"type": action_type, "target_w": action_target_w, "ttl_days": int(action_ttl)},
+                        confidence=confidence,
+                    )
+                    repo_dc.add(card)
+                    repo_dc.save()
+                    st.success(f"DecisionCard {card.card_id} created")
+                except Exception as e:
+                    st.error(f"Error creating card: {e}")
+        if repo_dc.all():
+            import pandas as pd
+            st.markdown("### Existing Cards")
+            df = pd.DataFrame([c.to_dict() for c in repo_dc.all()])
+            st.dataframe(df)
+        else:
+            st.info("No DecisionCards yet")
 
 st.caption("Frontend-first Konsole • Personal Use • KISS")
