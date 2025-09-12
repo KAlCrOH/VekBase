@@ -1,3 +1,25 @@
+"""
+# ============================================================
+# Context Banner — test_metrics | Category: test
+# Purpose: Prüft aggregierte Kennzahlen (realized/unrealized PnL, Drawdown, Holding-Dauer)
+
+# Contracts
+#   Inputs: synthetische Trades (Repo) + optional Mark Prices
+#   Outputs: Assertions auf berechnete Felder
+#   Side-Effects: none
+#   Determinism: deterministic
+
+# Invariants
+#   - Unrealized Berechnung konsistent mit Modell (Remaining Lots)
+
+# Dependencies
+#   Internal: analytics.metrics, core.trade_model, core.trade_repo
+#   External: stdlib (datetime)
+
+# Do-Not-Change
+#   Banner policy-relevant
+# ============================================================
+"""
 from app.analytics.metrics import aggregate_metrics
 from datetime import datetime
 from app.core.trade_model import validate_trade_dict

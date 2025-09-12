@@ -1,6 +1,30 @@
-"""In-memory trade repository with CSV load/save and position validation.
-No external deps. All I/O explicit. Positions computed on demand.
-"""
+# ============================================================
+# Context Banner — trade_repo | Category: core
+# Purpose: In-memory Speicherung & Verwaltung von Trades inkl. CSV Import/Export + Positions-Validierung
+
+# Contracts
+#   Inputs: Trade Objekte (add_trade/add_many), CSV Pfad (import/export)
+#   Outputs: interne Liste, Query-APIs (all, by_ticker, positions, position_for)
+#   Side-Effects: File I/O=read/write: trades.csv (nur via expliziten Methoden); Network=none
+#   Determinism: deterministic (Reihenfolge nach Import sortiert nach ts)
+
+# Invariants
+#   - Keine negative Position durch SELL (Validierung in add_trade)
+#   - Zeit Monotonie pro Ticker (ts nicht rückwärts)
+#   - Keine Hidden I/O: nur in import_csv/export_csv
+#   - Öffentliche Signaturen stabil
+
+# Dependencies
+#   Internal: core.trade_model (Trade, validate_trade_dict, TradeValidationError)
+#   External: stdlib (csv, pathlib, dataclasses, typing)
+
+# Tests
+#   tests/test_roundtrip.py (CSV roundtrip)
+#   tests/test_trade_model.py indirekt (Validierung kombiniert)
+
+# Do-Not-Change
+#   Banner ist policy-relevant; Änderungen nur via Task „Header aktualisieren“.
+# ============================================================
 from __future__ import annotations
 from typing import List, Dict, Iterable, Optional
 from dataclasses import dataclass

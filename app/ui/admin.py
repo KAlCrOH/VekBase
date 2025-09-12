@@ -1,3 +1,29 @@
+"""
+# ============================================================
+# Context Banner — admin | Category: cli
+# Purpose: Frühere einfache Admin-Ansicht (legacy) für Metrics/Trades vor Einführung der Konsole
+
+# Contracts
+#   Inputs: trades.csv falls vorhanden
+#   Outputs: Streamlit Darstellung (Metrics, Positions, optional Tabelle)
+#   Side-Effects: File I/O=read: data/trades.csv; Network=none
+#   Determinism: deterministic (abhängig von Dateiinhalt)
+
+# Invariants
+#   - Keine Schreiboperationen (read-only display)
+#   - Business-Logik delegiert an core/analytics
+
+# Dependencies
+#   Internal: core.trade_repo, analytics.metrics
+#   External: streamlit
+
+# Tests
+#   Keiner direkt; abgelöst durch console.py (Konsole übernimmt Funktionalität)
+
+# Do-Not-Change
+#   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
+# ============================================================
+"""
 import streamlit as st
 from pathlib import Path
 from datetime import datetime

@@ -1,3 +1,30 @@
+"""
+# ============================================================
+# Context Banner — console | Category: cli
+# Purpose: Zentrale Streamlit Konsole (Trades erfassen, Analytics anzeigen, Simulation Runs auslösen, Tests ausführen)
+
+# Contracts
+#   Inputs: User Form Eingaben (Trades), Simulation Parameter (steps, seed, momentum window)
+#   Outputs: UI Rendering, persistierte Simulationsergebnisse via sim.simple_walk.run_and_persist
+#   Side-Effects: File I/O=read/write: data/trades.csv, data/results/*; Network=none
+#   Determinism: UI deterministisch außer Zeitstempel für neue Simulationen
+
+# Invariants
+#   - Keine Business-Logik (nur Delegation an core/analytics/sim)
+#   - Kein Netzwerkzugriff
+#   - Persistenzpfade unter ./data/
+
+# Dependencies
+#   Internal: core.trade_repo, core.trade_model, analytics.metrics, sim.simple_walk
+#   External: streamlit, stdlib (pathlib, datetime, subprocess, csv, io)
+
+# Tests
+#   Indirekt über Modultests (Analytics, Simulation, Repo). UI selbst nicht unit-getestet.
+
+# Do-Not-Change
+#   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
+# ============================================================
+"""
 import streamlit as st
 from pathlib import Path
 from datetime import datetime, timedelta

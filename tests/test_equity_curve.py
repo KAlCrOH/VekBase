@@ -1,3 +1,25 @@
+"""
+# ============================================================
+# Context Banner — test_equity_curve | Category: test
+# Purpose: Verifiziert dass realized_equity_curve nach erstem SELL positiven Wert liefert
+
+# Contracts
+#   Inputs: Trades (2x BUY, 1x SELL) -> Repo
+#   Outputs: Assertions auf Länge und positiver Equity Punkt
+#   Side-Effects: none
+#   Determinism: deterministic
+
+# Invariants
+#   - Nur SELL erzeugt Punkt in Kurve
+
+# Dependencies
+#   Internal: analytics.metrics, core.trade_model, core.trade_repo
+#   External: stdlib
+
+# Do-Not-Change
+#   Banner policy-relevant
+# ============================================================
+"""
 from app.analytics.metrics import realized_equity_curve, aggregate_metrics
 from app.core.trade_model import validate_trade_dict
 from app.core.trade_repo import TradeRepository

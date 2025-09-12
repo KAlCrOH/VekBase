@@ -1,6 +1,27 @@
-"""RAG retrieval stub (local deterministic, no external calls).
-Future: embed context docs + simple similarity. For now: simple keyword filter.
-"""
+# ============================================================
+# Context Banner — retrieval | Category: core
+# Purpose: Lokaler Keyword-basierter Retrieval Stub über Kontext-Markdown Dateien (RAG Vorbereitung, kein Netz)
+
+# Contracts
+#   Inputs: retrieve(query:str, limit:int) => simple substring/occurrence scoring; list_context_files() enumeriert .md
+#   Outputs: List[{'file','score','snippet'}] sortiert desc score
+#   Side-Effects: File I/O=read: docs/CONTEXT/*.md; Network=none
+#   Determinism: deterministic (Dateisystemzustand)
+
+# Invariants
+#   - Keine Embeddings / Kein Netzwerk
+#   - Pure Keyword Count, stabile Sortierung
+
+# Dependencies
+#   Internal: docs Directory Struktur
+#   External: stdlib (pathlib, typing)
+
+# Tests
+#   tests/test_retrieval.py (Smoke Keyword)
+
+# Do-Not-Change
+#   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
+# ============================================================
 from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict

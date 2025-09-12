@@ -1,8 +1,30 @@
-"""Trade data model and validation.
-Context derived from `docs/CONTEXT/04_DATA_SCHEMA_TRADES.md`.
-Klarheit vor Cleverness: simple dataclass + explicit validate function.
-No hidden I/O, pure functions for validation.
-"""
+# ============================================================
+# Context Banner — trade_model | Category: core
+# Purpose: Definiert das Trade-Datenmodell + Validierung (CSV/Manuelle Eingabe → Trade Instanz)
+
+# Contracts
+#   Inputs: dict raw Trade-Felder (trade_id, ts(str|datetime), ticker, action(BUY|SELL), shares>0, price>=0, fees>=0 optional tag/note_path/account)
+#   Outputs: Immutable dataclass Trade; raises TradeValidationError bei Verstoß
+#   Side-Effects: File I/O=none; Network=none
+#   Determinism: deterministic
+
+# Invariants
+#   - Keine Hidden I/O; reine Validierungsfunktionen.
+#   - Öffentliche Signaturen stabil: validate_trade_dict, Trade, TradeValidationError.
+#   - Keine sys.path Hacks (Import via Package-Struktur).
+#   - Keine RAG/Embeddings.
+
+# Dependencies
+#   Internal: core.trade_model (self), genutzt von core.trade_repo, analytics.metrics, ui.console
+#   External: stdlib (dataclasses, datetime)
+
+# Tests
+#   tests/test_trade_model.py | Happy Path + Missing Fields Negativfall
+
+# Do-Not-Change
+#   Banner ist policy-relevant (Working Agreements v2); Änderungen nur bei Task „Header aktualisieren“.
+# ============================================================
+"""Trade data model and validation (implementation details below)."""
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime

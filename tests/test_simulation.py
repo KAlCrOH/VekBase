@@ -1,3 +1,25 @@
+"""
+# ============================================================
+# Context Banner — test_simulation | Category: test
+# Purpose: Testet Determinismus der Walk-Forward Simulation (gleicher Seed => gleiche Ergebnisse)
+
+# Contracts
+#   Inputs: synthetische Preisreihe, momentum_rule(2), seed
+#   Outputs: Assertions auf final_cash & Hash-Gleichheit
+#   Side-Effects: none
+#   Determinism: deterministic (über Seed gesichert)
+
+# Invariants
+#   - Hash unverändert bei identischen Parametern
+
+# Dependencies
+#   Internal: sim.simple_walk
+#   External: stdlib (datetime)
+
+# Do-Not-Change
+#   Banner policy-relevant
+# ============================================================
+"""
 from datetime import datetime, timedelta
 from app.sim.simple_walk import run_sim, momentum_rule
 

@@ -1,3 +1,25 @@
+"""
+# ============================================================
+# Context Banner — test_trade_model | Category: test
+# Purpose: Tests für Trade Validierung (Happy Path + Fehlende Felder Negativfall)
+
+# Contracts
+#   Inputs: raw dicts simuliert CSV/Manuelle Eingabe
+#   Outputs: Assertions auf Trade Objekt oder Exception
+#   Side-Effects: none
+#   Determinism: deterministic
+
+# Invariants
+#   - Prüft Pflichtfelder & Fehlermeldung
+
+# Dependencies
+#   Internal: core.trade_model
+#   External: stdlib
+
+# Do-Not-Change
+#   Banner policy-relevant
+# ============================================================
+"""
 from app.core.trade_model import validate_trade_dict, TradeValidationError
 from datetime import datetime
 

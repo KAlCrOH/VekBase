@@ -1,7 +1,30 @@
-"""Basic portfolio/trade metrics.
-All functions pure: input = list[Trade], output = dict/values.
-No hidden I/O. Extend later for DuckDB if needed.
-"""
+# ============================================================
+# Context Banner — metrics | Category: analytics
+# Purpose: Berechnung von realisierten & ausgewählten unrealisierten Kennzahlen (PnL, Win-Rate, Profit-Factor, Drawdown, Holding-Dauer, Equity Curve)
+
+# Contracts
+#   Inputs: List[Trade]; optional mark_prices: Dict[ticker->price]; optional now: datetime
+#   Outputs: Dict[str, float|str] (aggregate_metrics), List[(ts, equity)] (realized_equity_curve), List[TradePNL] via compute_realized_pnl
+#   Side-Effects: File I/O=none; Network=none
+#   Determinism: deterministic (sort by ts)
+
+# Invariants
+#   - Keine Hidden I/O, reine Berechnungen
+#   - FIFO Matching für Realized PnL
+#   - Mark-to-Market nur wenn mark_prices gesetzt
+#   - Öffentliche Signaturen stabil (aggregate_metrics, realized_equity_curve, compute_realized_pnl)
+
+# Dependencies
+#   Internal: core.trade_model.Trade
+#   External: stdlib (dataclasses, datetime, typing)
+
+# Tests
+#   tests/test_metrics.py (realized/unrealized + duration)
+#   tests/test_equity_curve.py (Equity Curve)
+
+# Do-Not-Change
+#   Banner policy-relevant; Änderungen nur mit Task „Header aktualisieren“.
+# ============================================================
 from __future__ import annotations
 from typing import List, Dict, Tuple
 from datetime import datetime

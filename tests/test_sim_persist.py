@@ -1,3 +1,26 @@
+"""
+# ============================================================
+# Context Banner — test_sim_persist | Category: test
+# Purpose: Testet Persistenz der Simulation (Ordnerstruktur + meta.json/equity.csv Erstellung)
+
+# Contracts
+#   Inputs: kurze Preisreihe, momentum_rule, seed, tmp_path als results_dir
+#   Outputs: Assertions auf erzeugten Ordner & meta Inhalt
+#   Side-Effects: File I/O=write temp simulation folder
+#   Determinism: deterministic (Timestamp-Verzeichnis variabel, Struktur konsistent)
+
+# Invariants
+#   - Genau ein neuer Ordner
+#   - meta.json enthält Hash & final_cash
+
+# Dependencies
+#   Internal: sim.simple_walk
+#   External: stdlib (datetime, pathlib)
+
+# Do-Not-Change
+#   Banner policy-relevant
+# ============================================================
+"""
 from datetime import datetime, timedelta
 from pathlib import Path
 from app.sim.simple_walk import run_and_persist, momentum_rule

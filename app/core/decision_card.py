@@ -1,6 +1,27 @@
-"""DecisionCard skeleton per spec (05_DECISION_CARD_SPEC.md).
-KISS placeholder capturing core fields; extend later with evaluation hooks.
-"""
+# ============================================================
+# Context Banner — decision_card | Category: core
+# Purpose: Lightweight DecisionCard Dataclass zur Dokumentation von Annahmen & Entscheidungen (ADR-Light)
+
+# Contracts
+#   Inputs: make_decision_card(card_id, author, title, **optional_fields)
+#   Outputs: DecisionCard Instanz (to_dict serialisiert ISO timestamps)
+#   Side-Effects: File I/O=none; Network=none
+#   Determinism: deterministic (Zeit via datetime.utcnow() – austauschbar für UTC aware)
+
+# Invariants
+#   - Keine Logik jenseits reiner Datenhaltung
+#   - Erweiterbar um Evaluations-/Review Felder
+
+# Dependencies
+#   Internal: none (kann mit analytics Snapshot kombiniert werden)
+#   External: stdlib (dataclasses, datetime, typing)
+
+# Tests
+#   tests/test_decision_card.py
+
+# Do-Not-Change
+#   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
+# ============================================================
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime

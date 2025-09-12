@@ -1,3 +1,25 @@
+"""
+# ============================================================
+# Context Banner — test_roundtrip | Category: test
+# Purpose: Verifiziert CSV Export + Import (Roundtrip) und Positionsberechnung
+
+# Contracts
+#   Inputs: künstliche Trades -> Repo -> Export -> Reimport
+#   Outputs: Assertions (Anzahl Trades, Positionswert)
+#   Side-Effects: File I/O=write/read temp CSV
+#   Determinism: deterministic
+
+# Invariants
+#   - Position nach Roundtrip identisch
+
+# Dependencies
+#   Internal: core.trade_repo, core.trade_model
+#   External: stdlib (pathlib)
+
+# Do-Not-Change
+#   Banner policy-relevant
+# ============================================================
+"""
 from pathlib import Path
 from app.core.trade_repo import TradeRepository
 from app.core.trade_model import validate_trade_dict

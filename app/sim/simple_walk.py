@@ -1,8 +1,29 @@
-"""Deterministic walk-forward simulation.
-Takes initial cash, list of trades (planned) decisions produced via a trivial rule.
-No look-ahead: only past prices considered.
-Prices passed explicitly (list of (ts, price)).
-"""
+# ============================================================
+# Context Banner — simple_walk | Category: sim
+# Purpose: Deterministische Walk-Forward Mini-Simulation mit Momentum-Regel + Persistenz (meta.json, equity.csv)
+
+# Contracts
+#   Inputs: prices: List[(datetime, price)], rule(history)->'BUY'|'SELL'|'HOLD', seed:int, optional params (initial_cash, trade_size)
+#   Outputs: SimResult (equity_curve, final_cash, meta{'seed','hash'}) / Persistenz Ordner via run_and_persist
+#   Side-Effects: File I/O=write: data/results/<timestamp>_<hash>/{meta.json,equity.csv} (nur run_and_persist); Network=none
+#   Determinism: seeded (hash basiert auf Parametern)
+
+# Invariants
+#   - Keine Look-Ahead Nutzung: Regel sieht nur Historie bis i
+#   - Kein Hidden I/O in run_sim (Persistenz ausschließlich in run_and_persist)
+#   - Seed + Parameter bestimmen Hash (Reproduzierbarkeit)
+
+# Dependencies
+#   Internal: none (kann von ui.console genutzt werden)
+#   External: stdlib (hashlib, random, datetime, pathlib, json, csv, dataclasses)
+
+# Tests
+#   tests/test_simulation.py (Determinismus)
+#   tests/test_sim_persist.py (Persistenz-Struktur)
+
+# Do-Not-Change
+#   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
+# ============================================================
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple, Callable, Dict, Any
