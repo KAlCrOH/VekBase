@@ -104,7 +104,7 @@ Legende: [x] erledigt / [ ] offen / [~] Stub (minimal, Ausbau nötig)
 ### 17. Checkpoints
 17.1 [x] Dev Server up (/health)  
 17.2 [ ] End-to-End ingest→index→API query  
-17.3 [ ] Bundle Parquet prüfen  
+17.3 [x] Bundle Parquet prüfen  
 17.4 [ ] Traces sichtbar (OTel Export)  
 
 ### 18. Best Practices
@@ -112,7 +112,7 @@ Legende: [x] erledigt / [ ] offen / [~] Stub (minimal, Ausbau nötig)
 18.2 [ ] README GPU Beispiele (vLLM Start)  
 18.3 [ ] Security Review (API Keys)  
 18.4 [ ] Data Retention Bundles  
-18.5 [ ] Bundle Schema Versionierung  
+18.5 [x] Bundle Schema Versionierung  
 
 ### Offene Prioritäten (Top 5)
 P1: Vollständiger Index Build + E2E Test (11.5 + 17.2)  

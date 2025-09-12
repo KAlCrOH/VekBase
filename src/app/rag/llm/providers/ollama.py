@@ -1,2 +1,0 @@
-DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
-DEFAULT_MODEL = "llama3.1"
