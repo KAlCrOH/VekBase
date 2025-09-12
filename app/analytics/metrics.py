@@ -4,6 +4,7 @@ No hidden I/O. Extend later for DuckDB if needed.
 """
 from __future__ import annotations
 from typing import List, Dict, Tuple
+from datetime import datetime
 from dataclasses import dataclass
 from ..core.trade_model import Trade
 
@@ -64,8 +65,11 @@ def _max_drawdown(series: List[float]) -> float:
             max_dd = dd
     return abs(max_dd)
 
-def aggregate_metrics(trades: List[Trade]) -> Dict[str, float]:
-    """Aggregate realized metrics (no unrealized yet)."""
+def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None = None, now: datetime | None = None) -> Dict[str, float]:
+    """Aggregate realized metrics plus optional unrealized and holding duration.
+    mark_prices: current price per ticker for unrealized estimation. If omitted unrealized=0.
+    now: timestamp used for marking duration of open positions (default = max trade ts).
+    """
     pnl_entries, total_realized = compute_realized_pnl(trades)
     sells = [p for p in pnl_entries]
     wins = [p for p in sells if p.realized_pnl > 0]
@@ -74,6 +78,44 @@ def aggregate_metrics(trades: List[Trade]) -> Dict[str, float]:
     total_fees = sum(p.fees for p in sells)
     cum = _cumulative([p.realized_pnl for p in sells])
     max_dd = _max_drawdown(cum)
+
+    # Build inventory for unrealized + holding durations
+    inv: Dict[str, List[Tuple[float, float, datetime]]] = {}  # ticker -> list of (shares_remaining, price, ts_open)
+    closed_durations: List[float] = []  # seconds
+    # replay trades
+    for t in sorted(trades, key=lambda x: x.ts):
+        if t.action == "BUY":
+            inv.setdefault(t.ticker, []).append((t.shares, t.price, t.ts))
+        else:  # SELL
+            remaining = t.shares
+            lots = inv.get(t.ticker, [])
+            i = 0
+            while remaining > 1e-12 and i < len(lots):
+                lot_sh, lot_price, lot_ts = lots[i]
+                take = min(lot_sh, remaining)
+                lot_sh -= take
+                remaining -= take
+                # duration for portion closed
+                closed_durations.append((t.ts - lot_ts).total_seconds())
+                if lot_sh <= 1e-12:
+                    lots.pop(i)
+                else:
+                    lots[i] = (lot_sh, lot_price, lot_ts)
+                    i += 1
+
+    # Unrealized mark-to-market
+    unrealized = 0.0
+    if mark_prices:
+        for ticker, lots in inv.items():
+            mp = mark_prices.get(ticker)
+            if mp is None:
+                continue
+            for lot_sh, lot_price, _lot_ts in lots:
+                unrealized += (mp - lot_price) * lot_sh
+
+    avg_holding_duration = (sum(closed_durations) / len(closed_durations)) if closed_durations else 0.0
+    now_ts = now or (max((t.ts for t in trades), default=datetime.utcnow()))
+    open_positions = sum(lot_sh for lots in inv.values() for lot_sh, _, _ in lots)
     return {
         "trades_total": len(trades),
         "sells": len(sells),
@@ -83,4 +125,20 @@ def aggregate_metrics(trades: List[Trade]) -> Dict[str, float]:
         "total_fees": total_fees,
         "profit_factor": (sum(p.realized_pnl for p in wins) / abs(sum(p.realized_pnl for p in losses)) if losses else float('inf')) if sells else 0.0,
         "max_drawdown_realized": max_dd,
+        "unrealized_pnl": unrealized,
+        "avg_holding_duration_sec": avg_holding_duration,
+        "open_position_shares": open_positions,
+        "timestamp_now": now_ts.isoformat(),
     }
+
+def realized_equity_curve(trades: List[Trade], start_equity: float = 0.0) -> List[Tuple]:
+    """Return list of (timestamp, cumulative_realized_equity) using realized PnL only.
+    Useful for charting in UI Dev console. Start equity can shift baseline.
+    """
+    pnl_entries, _ = compute_realized_pnl(trades)
+    curve: List[Tuple] = []
+    acc = start_equity
+    for entry in pnl_entries:
+        acc += entry.realized_pnl
+        curve.append((entry.trade.ts, acc))
+    return curve

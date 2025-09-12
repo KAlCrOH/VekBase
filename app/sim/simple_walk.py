@@ -9,6 +9,9 @@ from typing import List, Tuple, Callable, Dict, Any
 import hashlib
 import random
 from datetime import datetime
+from pathlib import Path
+import json
+import csv
 
 @dataclass
 class SimResult:
@@ -60,3 +63,25 @@ def momentum_rule(window: int = 3) -> Callable[[List[Tuple[datetime, float]]], s
             return 'SELL'
         return 'HOLD'
     return rule
+
+def run_and_persist(prices: List[Tuple[datetime, float]], rule: Callable[[List[Tuple[datetime, float]]], str], seed: int, results_dir: Path, **kwargs) -> SimResult:
+    """Run simulation and persist under data/results/<timestamp>_<hash>/ (creates folder).
+    Saves: meta.json, equity.csv. Returns SimResult.
+    """
+    results_dir.mkdir(parents=True, exist_ok=True)
+    res = run_sim(prices, rule, seed=seed, **kwargs)
+    ts_label = datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')
+    folder = results_dir / f"{ts_label}_{res.meta['hash']}"
+    folder.mkdir(parents=True, exist_ok=True)
+    # meta
+    meta_path = folder / 'meta.json'
+    meta_content = {"seed": res.meta['seed'], "hash": res.meta['hash'], "final_cash": res.final_cash, "params": {k: v for k, v in kwargs.items()}}
+    meta_path.write_text(json.dumps(meta_content, indent=2), encoding='utf-8')
+    # equity
+    eq_path = folder / 'equity.csv'
+    with eq_path.open('w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(['ts', 'equity'])
+        for ts, val in res.equity_curve:
+            w.writerow([ts.isoformat(), f"{val:.6f}"])
+    return res

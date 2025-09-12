@@ -7,6 +7,7 @@ Invariants:
 - Rechenlogik in `core/*`, UI ist dünn.
 - Daten liegen in `data/`, nie in `app/`.
  - `pytest.ini` definiert Pfad statt sys.path Hacks.
+ - Frontend-first: zentrale Streamlit Konsole dient auch als Developer-Oberfläche (Tests, später Lints) ohne Business-Logik zu enthalten.
 
 Repro:
 - Jede Simulation schreibt Hash/Seed/Params nach `data/results/`.

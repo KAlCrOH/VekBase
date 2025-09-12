@@ -15,8 +15,9 @@ Non-Goals:
 - Keine komplexe MLOps/Cloud.
 
 Success Criteria (MVP Status):
-- Trades laden/anzeigen (CSV Validierung) — Implementiert.
-- Basis-Kennzahlen (realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown) — Implementiert.
+- Trades laden/anzeigen & eingeben (Form + CSV Validierung) — Implementiert.
+- Basis-Kennzahlen (realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown, realized Equity Curve) — Implementiert.
 - Einfache Walk-Forward-Simulation (Seed + Hash) — Implementiert.
 - Reprozierbarkeit (Seed + Hash) — Implementiert.
-- Offene Punkte: Pattern-Mining, Holding-Dauer, DecisionCards, RAG.
+- Developer Productivity: Frontend-first Konsole mit Pytest Runner — Implementiert.
+- Offene Punkte: Simulation Persistenz, Pattern-Mining, Holding-Dauer, DecisionCards, RAG, Live Quotes.

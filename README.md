@@ -11,13 +11,15 @@
 - Keine Look-ahead-Bias (siehe `CONTEXT/06_RAG_CONTEXT_POLICY.md`). RAG ist optional.
 - Non-Goals: Broker-Sync, Multi-User, Cloud/MLOps.
 
-## Geplante Module
+## Implementierte / Neue Module
 - `app/core/trade_model.py`: Dataclass + Validation.
 - `app/core/trade_repo.py`: In-Memory + CSV Load/Save + Positionsvalidierung.
-- `app/analytics/metrics.py`: Basis-Kennzahlen inkl. realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown.
-- `app/sim/simple_walk.py`: Einfache Walk-Forward Simulation (Seed-basiert).
-- `app/ui/admin.py`: Streamlit Admin Oberfläche.
-- `tests/`: Pytests für Schema, Analytics, Simulation Determinismus.
+- `app/analytics/metrics.py`: Realized + Unrealized PnL, Win-Rate, Profit-Factor, realized Max Drawdown, Holding-Dauer (avg), Equity Curve (realized).
+- `app/sim/simple_walk.py`: Deterministische Walk-Forward Simulation + `run_and_persist` -> `data/results/<ts>_<hash>/` mit `meta.json` & `equity.csv`.
+- `app/core/decision_card.py`: DecisionCard Skeleton.
+- `app/core/retrieval.py`: Einfache lokale Keyword Retrieval Stub (RAG Vorbereitung).
+- `app/ui/console.py`: Zentrale Streamlit Konsole (Tabs: Trades, Analytics, Simulation Runs (Persistenz), DevTools Test Runner).
+- `tests/`: 10+ Pytests (Model, Repo Roundtrip, Analytics, Equity Curve, Simulation, Persistenz, DecisionCard, Retrieval).
 
 ## Setup (lokal)
 ```
@@ -26,15 +28,16 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Streamlit Start
+## Start (Frontend Zentrale)
 ```
-streamlit run app/ui/admin.py
+streamlit run app/ui/console.py
 ```
 
 ## Nächste Schritte
-1. Implementierung der Module laut Plan.
-2. CSV Beispiel unter `data/trades.csv` hinzufügen (manuell).
-3. Erweiterte Analytics (Equity Curve, unrealized PnL, Holding-Dauer, Patterns) & optionale RAG später.
+1. Optionale Pattern-Analytics (Histogramme, Scatter) & erweiterte Metriken (CAGR etc.).
+2. Ausbau Simulation Parameter (TP/SL, Kostenmodell) + Snapshot Tests.
+3. DecisionCard UI Integration + Retrieval Panel.
+4. (Optional) Live Quotes Feed (lokal Mock) für fortlaufende unrealized Updates.
 
 ## Lizenz
 Persönliche Nutzung (nicht für Enterprise).
