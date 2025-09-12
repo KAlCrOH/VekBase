@@ -1,0 +1,24 @@
+investor/
+├─ app/
+│  ├─ ui/               # Streamlit Admin
+│  │  └─ dashboard.py
+│  ├─ core/             # KISS-Logik, keine Framework-Magie
+│  │  ├─ storage.py     # SQLite/DuckDB I/O
+│  │  ├─ trades.py      # CRUD + Validierung Trade-CSV
+│  │  ├─ analytics.py   # PnL, Metriken, Pattern-Mining
+│  │  ├─ quotes.py      # yfinance + Cache (optional)
+│  │  ├─ sim.py         # simple Walk-Forward-Simulation
+│  │  ├─ rag.py         # (optional) ContextStore + Retrieval
+│  │  └─ llm.py         # (optional) LLMProvider + Prompts
+│  └─ config.py         # Pfade, Toggles, ENV
+├─ data/
+│  ├─ trades.csv        # manuell gepflegt (einmalig + Updates)
+│  ├─ notes/            # Markdown-Thesen/Begründungen
+│  ├─ cache/            # Kurs-Cache, Embeddings
+│  └─ results/          # Simulationsergebnisse, Reports
+├─ CONTEXT/             # >>> DEINE KONTEST-PAKETE (s.u.) <<<
+├─ prompts/             # Agent-/Tool-Prompts (s.u.)
+├─ tests/               # Pytest (Smoke + Repro Checks)
+├─ .env.example         # API-Keys/Toggles (LLM/Live Quotes)
+├─ README.md            # Kurzstart
+└─ Taskfile/Makefile    # Befehle: run, test, lint, embed, sim

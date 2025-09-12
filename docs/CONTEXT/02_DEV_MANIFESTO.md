@@ -1,0 +1,20 @@
+# Dev Manifesto
+
+Coding values: Klarheit > Cleverness. Kleine Module, reine Funktionen wo möglich, explizite Seiteneffekte.
+
+Invariants:
+- Keine versteckte I/O in Analytics.
+- Rechenlogik in `core/*`, UI ist dünn.
+- Daten liegen in `data/`, nie in `app/`.
+ - `pytest.ini` definiert Pfad statt sys.path Hacks.
+
+Repro:
+- Jede Simulation schreibt Hash/Seed/Params nach `data/results/`.
+- Schema-Änderungen dokumentiert in `CONTEXT/04_DATA_SCHEMA_TRADES.md`.
+
+Performance:
+- DuckDB für Aggregationen.
+- Caching für Quotes/Embeddings mit TTL.
+
+Testing:
+- Smoke-Tests (CSV lesen/schreiben, Kennzahlen, kleine Simulation).
