@@ -15,9 +15,8 @@ Non-Goals:
 - Keine komplexe MLOps/Cloud.
 
 Success Criteria (MVP Status):
-- Trades laden/anzeigen & eingeben (Form + CSV Validierung) — Implementiert.
-- Basis-Kennzahlen (realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown, realized Equity Curve) — Implementiert.
-- Einfache Walk-Forward-Simulation (Seed + Hash) — Implementiert.
-- Reprozierbarkeit (Seed + Hash) — Implementiert.
-- Developer Productivity: Frontend-first Konsole mit Pytest Runner — Implementiert.
-- Offene Punkte: Simulation Persistenz, Pattern-Mining, Holding-Dauer, DecisionCards, RAG, Live Quotes.
+- Implementiert: Trade Erfassung/Validierung, Basis-Kennzahlen (realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown, realized Equity Curve), einfache Walk-Forward-Simulation (Seed+Hash), Reproduzierbarkeit (Seed+Hash), Frontend-first Konsole (Pytest Runner).
+- Offene Punkte (Quelle: ROADMAP): CAGR, unrealized PnL/Equity Curve, Pattern Analytics, DecisionCards (erweitert), Retrieval Filter & RAG, erweiterte Sim-Parameter, Live Quotes.
+- Charter listet keine Detail-Backlogs → zentrale Quelle: `CONTEXT/09_ROADMAP_MVP.md`.
+
+Backlog Referenzen (Kurz): Kern offene Punkte IDs #1 #2 #3 #5 #6 #7 #8 #9 #10 — siehe tmp_backlogCollection.md

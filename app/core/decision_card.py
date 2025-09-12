@@ -1,6 +1,7 @@
 # ============================================================
 # Context Banner — decision_card | Category: core
 # Purpose: Lightweight DecisionCard Dataclass zur Dokumentation von Annahmen & Entscheidungen (ADR-Light)
+# Note: Spec (CONTEXT/05_DECISION_CARD_SPEC.md) beschreibt zusätzliche Felder (action{type,target_w,ttl_days}, risks, confidence) – aktuell NICHT enthalten → Backlog P0 (DecisionCard Feld-Divergenz)
 
 # Contracts
 #   Inputs: make_decision_card(card_id, author, title, **optional_fields)

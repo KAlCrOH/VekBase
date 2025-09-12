@@ -10,4 +10,6 @@
   "risks": ["Rate shock", "Supply constraints"],
   "confidence": 0.0-1.0
 }
-  Status: Noch nicht implementiert. `maxdd` bezieht sich zukünftig auf Equity Curve (aktuell nur realized Variante verfügbar).
+  Status: TEIL-IMPLEMENTIERT: Dataclass (`core/decision_card.py`) enthält aktuell NUR Basisfelder (card_id, created_at, author, title, context_refs, assumptions, options, decision, rationale, metrics_snapshot). Fehlend: action{type,target_w,ttl_days}, risks, confidence. `maxdd` Ziel: Equity Curve (heute nur realized Variante). → Backlog P0 DecisionCard Feld-Divergenz.
+
+Backlog: DecisionCard Feld-Divergenz (#2) — siehe tmp_backlogCollection.md

@@ -14,8 +14,8 @@ Repro:
 - Schema-Änderungen dokumentiert in `CONTEXT/04_DATA_SCHEMA_TRADES.md`.
 
 Performance:
-- DuckDB für Aggregationen.
-- Caching für Quotes/Embeddings mit TTL.
+- DuckDB für Aggregationen (optional; noch nicht integriert).
+- Geplante Caching-Strategien (Quotes später; keine Embeddings implementiert – RAG optional, siehe Policy).
 
 Testing:
-- Smoke-Tests (CSV lesen/schreiben, Kennzahlen, kleine Simulation).
+- Smoke-Tests (CSV lesen/schreiben, realized Kennzahlen, kleine Simulation). Unrealized/Pattern Tests folgen Roadmap.

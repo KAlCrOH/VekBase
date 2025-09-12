@@ -45,6 +45,7 @@ def test_aggregate_metrics():
     assert metrics["sells"] == 1
     assert metrics["total_realized_pnl"] > 0
     assert "max_drawdown_realized" in metrics
+    assert "cagr" in metrics
 
 
 def test_unrealized_and_duration_metrics():

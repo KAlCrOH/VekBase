@@ -1,12 +1,22 @@
 # Roadmap (MVP → +RAG/LLM)
 
 MVP (P0-P3) Status: Basis implementiert (Charter, Schema, UI Grundfunktionen, realized Analytics, simple Sim, Tests).
-Kurzfristige Prioritäten:
-1) Trade Formular & Append Flow.
-2) Erweiterte Analytics (Equity Curve + unrealized PnL + Holding-Dauer + CAGR).
-3) Simulation Parameter & Persistenz (data/results/...).
-4) DecisionCard Skeleton (ohne LLM) aus Kennzahlen.
-5) RAG Retrieval Minimal (Dateifilter + Zeitfilter) ohne Embeddings.
+Kurzfristige Prioritäten (Aktualisiert):
+P0
+ - UI SimResult Rückgabemismatch fixen
+ - DecisionCard Feld-Erweiterung (action, risks, confidence)
+P1
+ - Retrieval Filter (ticker, as_of) + Snippet Qualität
+ - Erweiterte Sim-Parameter (TP/SL/Kosten)
+ - Architektur-Doku aktualisieren
+P2
+ - Analytics: CAGR Berechnung
+ - Unrealized Equity Curve + unrealized PnL Erweiterung
+ - Pattern Analytics (Histogramme, Scatter)
+ - Snapshot Regression Tests (Sim/Analytics)
+ - DecisionCard/Retrieval UI Panels & Tests
 
 Später: Live Quotes Cache, Embeddings, LLM Integration.
+
+Backlog Referenzen: #1 #2 #3 #4 #5 #6 #7 #8 #9 #10 — Details siehe tmp_backlogCollection.md
 

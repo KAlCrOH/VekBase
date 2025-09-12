@@ -1,6 +1,6 @@
 # ============================================================
 # Context Banner — metrics | Category: analytics
-# Purpose: Berechnung von realisierten & ausgewählten unrealisierten Kennzahlen (PnL, Win-Rate, Profit-Factor, Drawdown, Holding-Dauer, Equity Curve)
+# Purpose: Berechnung von REALIZED Kennzahlen + optionale unrealized Felder (nur wenn mark_prices gesetzt) (PnL, Win-Rate, Profit-Factor, realized Drawdown, Holding-Dauer, realized Equity Curve)
 
 # Contracts
 #   Inputs: List[Trade]; optional mark_prices: Dict[ticker->price]; optional now: datetime
@@ -11,7 +11,7 @@
 # Invariants
 #   - Keine Hidden I/O, reine Berechnungen
 #   - FIFO Matching für Realized PnL
-#   - Mark-to-Market nur wenn mark_prices gesetzt
+#   - Mark-to-Market nur wenn mark_prices gesetzt (sonst unrealized_pnl=0)
 #   - Öffentliche Signaturen stabil (aggregate_metrics, realized_equity_curve, compute_realized_pnl)
 
 # Dependencies
@@ -30,6 +30,7 @@ from typing import List, Dict, Tuple
 from datetime import datetime
 from dataclasses import dataclass
 from ..core.trade_model import Trade
+from math import pow
 
 @dataclass
 class TradePNL:
@@ -88,6 +89,30 @@ def _max_drawdown(series: List[float]) -> float:
             max_dd = dd
     return abs(max_dd)
 
+def _cagr_from_curve(curve: List[Tuple[datetime, float]]) -> float:  # type: ignore[name-defined]
+    """Compute CAGR basierend auf erster/letzter Equity und Zeitdelta in Jahren.
+    Erwartet Liste (ts, equity); falls unzureichend Daten oder Zeitraum 0 -> 0.0.
+    """
+    if not curve or len(curve) < 2:
+        return 0.0
+    start_ts, start_eq = curve[0]
+    end_ts, end_eq = curve[-1]
+    if start_eq <= 0:
+        return 0.0
+    delta_days = (end_ts - start_ts).total_seconds() / 86400.0
+    if delta_days <= 0:
+        return 0.0
+    years = delta_days / 365.0
+    if years <= 0:
+        return 0.0
+    multiple = end_eq / start_eq
+    if multiple <= 0:
+        return 0.0
+    try:
+        return pow(multiple, 1/years) - 1
+    except Exception:
+        return 0.0
+
 def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None = None, now: datetime | None = None) -> Dict[str, float]:
     """Aggregate realized metrics plus optional unrealized and holding duration.
     mark_prices: current price per ticker for unrealized estimation. If omitted unrealized=0.
@@ -139,7 +164,7 @@ def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None 
     avg_holding_duration = (sum(closed_durations) / len(closed_durations)) if closed_durations else 0.0
     now_ts = now or (max((t.ts for t in trades), default=datetime.utcnow()))
     open_positions = sum(lot_sh for lots in inv.values() for lot_sh, _, _ in lots)
-    return {
+    result = {
         "trades_total": len(trades),
         "sells": len(sells),
         "win_rate": (len(wins) / len(sells)) if sells else 0.0,
@@ -153,6 +178,10 @@ def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None 
         "open_position_shares": open_positions,
         "timestamp_now": now_ts.isoformat(),
     }
+    # CAGR nur wenn ausreichend realisierte Kurve existiert
+    realized_curve = realized_equity_curve(trades)
+    result["cagr"] = _cagr_from_curve(realized_curve) if realized_curve else 0.0
+    return result
 
 def realized_equity_curve(trades: List[Trade], start_equity: float = 0.0) -> List[Tuple]:
     """Return list of (timestamp, cumulative_realized_equity) using realized PnL only.

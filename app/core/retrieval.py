@@ -1,6 +1,7 @@
 # ============================================================
 # Context Banner — retrieval | Category: core
 # Purpose: Lokaler Keyword-basierter Retrieval Stub über Kontext-Markdown Dateien (RAG Vorbereitung, kein Netz)
+# Status: Kein (ticker, as_of) Filter implementiert (siehe RAG Policy) → Backlog P1 Retrieval Filter
 
 # Contracts
 #   Inputs: retrieve(query:str, limit:int) => simple substring/occurrence scoring; list_context_files() enumeriert .md

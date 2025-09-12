@@ -1,7 +1,7 @@
 """
 # ============================================================
-# Context Banner — console | Category: cli
-# Purpose: Zentrale Streamlit Konsole (Trades erfassen, Analytics anzeigen, Simulation Runs auslösen, Tests ausführen)
+# Context Banner — console | Category: ui
+# Purpose: Zentrale Streamlit Konsole (Trades erfassen, REALIZED Analytics anzeigen, Simulation Runs auslösen, Tests ausführen)
 
 # Contracts
 #   Inputs: User Form Eingaben (Trades), Simulation Parameter (steps, seed, momentum window)
@@ -13,6 +13,7 @@
 #   - Keine Business-Logik (nur Delegation an core/analytics/sim)
 #   - Kein Netzwerkzugriff
 #   - Persistenzpfade unter ./data/
+#   - Zeigt aktuell NUR realized Kennzahlen (unrealized PnL / CAGR / Patterns noch nicht implementiert → siehe Roadmap)
 
 # Dependencies
 #   Internal: core.trade_repo, core.trade_model, analytics.metrics, sim.simple_walk
@@ -20,6 +21,9 @@
 
 # Tests
 #   Indirekt über Modultests (Analytics, Simulation, Repo). UI selbst nicht unit-getestet.
+
+# Known Gaps
+#   - Simulation Erfolgsmeldung erwartet res['folder'], run_and_persist liefert SimResult Objekt (Backlog P0: UI SimResult Rückgabemismatch)
 
 # Do-Not-Change
 #   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
@@ -131,8 +135,11 @@ with tabs[2]:
             prices.append((ts_i, price))
         try:
             res = run_and_persist(prices, momentum_rule(rule_window), seed=seed, results_dir=results_dir)
-            st.success(f"Simulation persisted: {res['folder']}")
-            st.json({k: v for k, v in res.items() if k != 'folder'})
+            if res.folder:
+                st.success(f"Simulation persisted: {res.folder.name}")
+            else:
+                st.warning("Simulation run has no folder reference (unexpected)")
+            st.json({"meta": res.meta, "final_cash": res.final_cash})
         except Exception as e:
             st.error(f"Simulation error: {e}")
     # list last few runs
@@ -152,22 +159,48 @@ with tabs[2]:
                     df = pd.read_csv(equity_file)
                     st.line_chart(df.set_index('ts'))
 
-# DevTools Tab
+# DevTools Tab (simple synchronous runner with filter)
 with tabs[3]:
     st.subheader("DevTools — Test Runner")
-    if st.button("Run Pytests"):
+    if "test_run_state" not in st.session_state:
+        st.session_state.test_run_state = {
+            "status": "idle",  # idle|running|passed|failed
+            "stdout": "",
+            "stderr": "",
+            "returncode": None,
+            "filter": "",
+        }
+    col_a, col_b = st.columns([3,1])
+    with col_a:
+        st.session_state.test_run_state["filter"] = st.text_input("Pytest -k Filter (optional)", st.session_state.test_run_state["filter"])
+    with col_b:
+        status = st.session_state.test_run_state["status"]
+        st.markdown(f"**Status:** {status}")
+
+    run_clicked = st.button("Run Tests")
+    if run_clicked and st.session_state.test_run_state["status"] != "running":
+        st.session_state.test_run_state["status"] = "running"
+        args = [sys.executable, "-m", "pytest", "-q"]
+        flt = st.session_state.test_run_state["filter"].strip()
+        if flt:
+            args.extend(["-k", flt])
         with st.spinner("Running tests..."):
             try:
-                result = subprocess.run([sys.executable, "-m", "pytest", "-q"], capture_output=True, text=True, timeout=60)
-                st.code(result.stdout or "(no stdout)")
-                if result.stderr:
-                    st.error(result.stderr)
-                if result.returncode == 0:
-                    st.success("Tests passed")
-                else:
-                    st.error(f"Tests failed (exit {result.returncode})")
+                result = subprocess.run(args, capture_output=True, text=True, timeout=120)
+                st.session_state.test_run_state["stdout"] = result.stdout or ""
+                st.session_state.test_run_state["stderr"] = result.stderr or ""
+                st.session_state.test_run_state["returncode"] = result.returncode
+                st.session_state.test_run_state["status"] = "passed" if result.returncode == 0 else "failed"
             except Exception as e:
-                st.error(f"Error running tests: {e}")
+                st.session_state.test_run_state["stderr"] = str(e)
+                st.session_state.test_run_state["status"] = "failed"
+
+    # Output panels
+    with st.expander("Test Output (stdout)", expanded=True):
+        st.code(st.session_state.test_run_state["stdout"] or "(empty)")
+    if st.session_state.test_run_state["stderr"]:
+        with st.expander("Errors/StdErr"):
+            st.code(st.session_state.test_run_state["stderr"])
     st.caption("Local only • No network • KISS")
 
 st.caption("Frontend-first Konsole • Personal Use • KISS")

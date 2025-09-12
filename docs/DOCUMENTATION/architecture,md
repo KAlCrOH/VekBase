@@ -1,24 +1,24 @@
-investor/
+VekBase/
 ├─ app/
-│  ├─ ui/               # Streamlit Admin
-│  │  └─ dashboard.py
-│  ├─ core/             # KISS-Logik, keine Framework-Magie
-│  │  ├─ storage.py     # SQLite/DuckDB I/O
-│  │  ├─ trades.py      # CRUD + Validierung Trade-CSV
-│  │  ├─ analytics.py   # PnL, Metriken, Pattern-Mining
-│  │  ├─ quotes.py      # yfinance + Cache (optional)
-│  │  ├─ sim.py         # simple Walk-Forward-Simulation
-│  │  ├─ rag.py         # (optional) ContextStore + Retrieval
-│  │  └─ llm.py         # (optional) LLMProvider + Prompts
-│  └─ config.py         # Pfade, Toggles, ENV
-├─ data/
-│  ├─ trades.csv        # manuell gepflegt (einmalig + Updates)
-│  ├─ notes/            # Markdown-Thesen/Begründungen
-│  ├─ cache/            # Kurs-Cache, Embeddings
-│  └─ results/          # Simulationsergebnisse, Reports
-├─ CONTEXT/             # >>> DEINE KONTEST-PAKETE (s.u.) <<<
-├─ prompts/             # Agent-/Tool-Prompts (s.u.)
-├─ tests/               # Pytest (Smoke + Repro Checks)
-├─ .env.example         # API-Keys/Toggles (LLM/Live Quotes)
-├─ README.md            # Kurzstart
-└─ Taskfile/Makefile    # Befehle: run, test, lint, embed, sim
+│  ├─ analytics/        # metrics.py (REALIZED Metrics, optional unrealized via mark_prices)
+│  ├─ core/             # trade_model, trade_repo, retrieval (Keyword Stub), decision_card, (Simulation uses sim/)
+│  ├─ sim/              # simple_walk (deterministische Mini-Simulation + Persistenz)
+│  └─ ui/               # console.py (Streamlit Konsole: Trades, Analytics, Simulation, DevTools)
+├─ data/                # (lokal, nicht versioniert erwartet) trades.csv, results/, optional notes/, cache/
+├─ docs/
+│  ├─ CONTEXT/          # 10 Kontext-Dateien (Charter, Manifesto, Glossary, Schema, Decision Spec, RAG Policy, Test Strategy, UI Spec, Roadmap, Working Agreements)
+│  └─ DOCUMENTATION/    # architecture, tmp_backlogCollection (Backlog Sammelstelle)
+├─ tests/               # Pytest Module (trade_model, metrics, retrieval, sim, equity curve, etc.)
+├─ README.md            # Kurzstart (lokal-first)
+└─ requirements.txt     # Python Abhängigkeiten (leichtgewichtig)
+
+Not Implemented Yet:
+- Embeddings / RAG Retrieval Filter (ticker, as_of)
+- DecisionCard vollständige Felder (action, risks, confidence)
+- Unrealized Equity Curve / CAGR / Pattern Analytics
+- Erweiterte Sim Parameter (TP/SL/Kosten)
+
+Konventionen:
+- Keine sys.path Hacks (pytest.ini steuert Pfad)
+- Reine Berechnungen in analytics, Persistenz explizit in sim/simple_walk.run_and_persist
+- Kontext-Sync: Roadmap = Quelle für offene Items; Charter/Test Strategy/UI Spec referenzieren nur

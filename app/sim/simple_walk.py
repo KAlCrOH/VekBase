@@ -1,6 +1,7 @@
 # ============================================================
 # Context Banner — simple_walk | Category: sim
 # Purpose: Deterministische Walk-Forward Mini-Simulation mit Momentum-Regel + Persistenz (meta.json, equity.csv)
+# Gap: Erweiterte Parameter (TP/SL/Kosten) laut UI Spec / Roadmap noch offen (Backlog Hinweis)
 
 # Contracts
 #   Inputs: prices: List[(datetime, price)], rule(history)->'BUY'|'SELL'|'HOLD', seed:int, optional params (initial_cash, trade_size)
@@ -25,7 +26,7 @@
 #   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
 # ============================================================
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Callable, Dict, Any
 import hashlib
 import random
@@ -39,6 +40,7 @@ class SimResult:
     equity_curve: List[Tuple[datetime, float]]
     final_cash: float
     meta: Dict[str, Any]
+    folder: Path | None = field(default=None)  # optional Persistenzpfad (nur gesetzt von run_and_persist)
 
 def run_sim(prices: List[Tuple[datetime, float]], rule: Callable[[List[Tuple[datetime, float]]], str], seed: int, initial_cash: float = 10_000.0, trade_size: float = 0.1) -> SimResult:
     """Run simple simulation.
@@ -105,4 +107,5 @@ def run_and_persist(prices: List[Tuple[datetime, float]], rule: Callable[[List[T
         w.writerow(['ts', 'equity'])
         for ts, val in res.equity_curve:
             w.writerow([ts.isoformat(), f"{val:.6f}"])
+    res.folder = folder
     return res
