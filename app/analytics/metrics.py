@@ -260,3 +260,208 @@ def realized_equity_curve_with_unrealized(  # non-breaking new helper
     extended = list(base_curve)
     extended.append((ts_now, realized_val + unreal))
     return extended
+
+
+def drawdown_curve(equity_curve: List[Tuple[datetime, float]]) -> List[Dict[str, float | str]]:
+    """Return drawdown series from an equity curve.
+    Input: list of (ts, equity). Output: list of {'ts': ISO, 'equity': val, 'drawdown_pct': pct}.
+    drawdown_pct <= 0 (0 at peaks). If equity <=0 or peak<=0 -> drawdown 0 to avoid division noise.
+    Deterministic and pure.
+    Edge cases: empty -> []. Single point -> dd=0.
+    """
+    if not equity_curve:
+        return []
+    peak = equity_curve[0][1]
+    out: List[Dict[str, float | str]] = []
+    for ts, val in equity_curve:
+        if val > peak:
+            peak = val
+        if peak <= 0 or val <= 0:
+            dd_pct = 0.0
+        else:
+            dd_pct = (val / peak) - 1.0  # negative or 0
+        out.append({"ts": ts.isoformat(), "equity": val, "drawdown_pct": round(dd_pct, 6)})
+    return out
+
+
+def position_size_series(trades: List[Trade]) -> List[Dict[str, float | str]]:
+    """Return time series of gross exposure measured as sum(shares*price) of open lots per timestamp.
+    Simplistic: uses trade execution price as mark.
+    Output: list of {'ts': ISO, 'gross_exposure': float} sorted by ts.
+    """
+    inv: Dict[str, List[Tuple[float, float]]] = {}  # ticker -> list(lot_shares, lot_price)
+    series: List[Dict[str, float | str]] = []
+    for t in sorted(trades, key=lambda x: x.ts):
+        if t.action == "BUY":
+            inv.setdefault(t.ticker, []).append((t.shares, t.price))
+        else:  # SELL
+            remaining = t.shares
+            lots = inv.get(t.ticker, [])
+            i = 0
+            while remaining > 1e-12 and i < len(lots):
+                lot_sh, lot_price = lots[i]
+                take = min(lot_sh, remaining)
+                lot_sh -= take
+                remaining -= take
+                if lot_sh <= 1e-12:
+                    lots.pop(i)
+                else:
+                    lots[i] = (lot_sh, lot_price)
+                    i += 1
+        gross = 0.0
+        for _ticker, lots in inv.items():
+            for lot_sh, lot_price in lots:
+                gross += lot_sh * lot_price
+        series.append({"ts": t.ts.isoformat(), "gross_exposure": round(gross, 6)})
+    return series
+
+
+def unrealized_equity_timeline(
+    trades: List[Trade],
+    mark_prices: Dict[str, float],
+    now: datetime | None = None,
+) -> List[Tuple[datetime, float]]:
+    """Return time series of unrealized equity value over time using provided mark_prices for open positions.
+    Approach:
+      - Replay trades chronologisch; nach jedem Trade aktuellen unrealized Wert (basierend auf mark_prices falls verfügbar) berechnen.
+      - Falls ein Ticker keine mark_price hat -> dessen Lots ignorieren (konservativ).
+      - Optional finaler Punkt (now) falls now > letzter Trade ts und offene Positionen existieren.
+    Returns list[(ts, unrealized_equity)]. Empty if no trades or no mark prices.
+    Deterministic & pure.
+    Edge Cases:
+      - Keine mark_prices -> []
+      - Alle Positionen geschlossen -> evtl. Zwischenwerte vorhanden, final 0 falls keine offenen.
+    """
+    if not mark_prices:
+        return []
+    inv: Dict[str, List[Tuple[float, float]]] = {}  # ticker -> list(lot_shares, lot_price)
+    timeline: List[Tuple[datetime, float]] = []
+    sorted_trades = sorted(trades, key=lambda x: x.ts)
+    for t in sorted_trades:
+        if t.action == "BUY":
+            inv.setdefault(t.ticker, []).append((t.shares, t.price))
+        else:
+            lots = inv.get(t.ticker, [])
+            remaining = t.shares
+            i = 0
+            while remaining > 1e-12 and i < len(lots):
+                lot_sh, lot_price = lots[i]
+                take = min(lot_sh, remaining)
+                lot_sh -= take
+                remaining -= take
+                if lot_sh <= 1e-12:
+                    lots.pop(i)
+                else:
+                    lots[i] = (lot_sh, lot_price)
+                    i += 1
+        # compute unrealized at this timestamp
+        unreal = 0.0
+        for ticker, lots in inv.items():
+            mp = mark_prices.get(ticker)
+            if mp is None:
+                continue
+            for lot_sh, lot_price in lots:
+                unreal += (mp - lot_price) * lot_sh
+        timeline.append((t.ts, unreal))
+    if not timeline:
+        return []
+    if now and timeline:
+        last_ts = timeline[-1][0]
+        if now > last_ts:
+            # recompute unrealized at now (inventory unchanged)
+            unreal = 0.0
+            for ticker, lots in inv.items():
+                mp = mark_prices.get(ticker)
+                if mp is None:
+                    continue
+                for lot_sh, lot_price in lots:
+                    unreal += (mp - lot_price) * lot_sh
+            timeline.append((now, unreal))
+    return timeline
+
+
+def unrealized_equity_timeline_by_ticker(
+    trades: List[Trade],
+    mark_prices: Dict[str, float],
+    now: datetime | None = None,
+) -> Dict[str, List[Tuple[datetime, float]]]:
+    """Return per-ticker unrealized timelines.
+    Returns dict[ticker] -> list[(ts, unrealized_value_for_that_ticker_at_ts)].
+    Only includes tickers present in trades and with at least one lot. Marks missing -> ticker excluded.
+    Adds optional final now point if provided and > last trade ts.
+    Deterministic & pure.
+    """
+    if not mark_prices:
+        return {}
+    # Collect trades per ticker for deterministic replay per ticker
+    by_ticker: Dict[str, List[Trade]] = {}
+    for t in trades:
+        by_ticker.setdefault(t.ticker, []).append(t)
+    out: Dict[str, List[Tuple[datetime, float]]] = {}
+    for ticker, tlist in by_ticker.items():
+        mark = mark_prices.get(ticker)
+        if mark is None:
+            continue
+        lots: List[Tuple[float, float]] = []
+        series: List[Tuple[datetime, float]] = []
+        for tr in sorted(tlist, key=lambda x: x.ts):
+            if tr.action == "BUY":
+                lots.append((tr.shares, tr.price))
+            else:
+                remaining = tr.shares
+                i = 0
+                while remaining > 1e-12 and i < len(lots):
+                    lot_sh, lot_price = lots[i]
+                    take = min(lot_sh, remaining)
+                    lot_sh -= take
+                    remaining -= take
+                    if lot_sh <= 1e-12:
+                        lots.pop(i)
+                    else:
+                        lots[i] = (lot_sh, lot_price)
+                        i += 1
+            unreal = 0.0
+            for lot_sh, lot_price in lots:
+                unreal += (mark - lot_price) * lot_sh
+            series.append((tr.ts, unreal))
+        if not series:
+            continue
+        if now and series and now > series[-1][0]:
+            unreal = 0.0
+            for lot_sh, lot_price in lots:
+                unreal += (mark - lot_price) * lot_sh
+            series.append((now, unreal))
+        out[ticker] = series
+    return out
+
+
+def rolling_volatility(equity_curve: List[Tuple[datetime, float]], window: int = 5) -> List[Dict[str, float | str]]:
+    """Compute rolling volatility (std dev of incremental returns) over realized equity curve.
+    Returns list of {'ts': ISO, 'vol': float}. For first (window-1) points vol=None.
+    Incremental returns defined as diff / prev_equity (skip if prev_equity==0).
+    Deterministic & pure.
+    """
+    if window <= 1:
+        raise ValueError("window must be >1")
+    if not equity_curve:
+        return []
+    rets: List[float] = []
+    out: List[Dict[str, float | str]] = []
+    prev_val = equity_curve[0][1]
+    out.append({"ts": equity_curve[0][0].isoformat(), "vol": None})
+    for ts, val in equity_curve[1:]:
+        if prev_val != 0:
+            ret = (val - prev_val) / abs(prev_val)
+        else:
+            ret = 0.0
+        rets.append(ret)
+        prev_val = val
+        if len(rets) >= window:
+            window_slice = rets[-window:]
+            mean = sum(window_slice)/len(window_slice)
+            var = sum((x-mean)**2 for x in window_slice)/len(window_slice)
+            vol = var ** 0.5
+            out.append({"ts": ts.isoformat(), "vol": round(vol, 6)})
+        else:
+            out.append({"ts": ts.isoformat(), "vol": None})
+    return out

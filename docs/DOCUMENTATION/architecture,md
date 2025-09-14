@@ -9,6 +9,7 @@ VekBase/
 │  (NEW) core/benchtools.py  # Einfache Benchmark Harness (Median ms + Baseline Persistenz) für ausgewählte Analytics
 │  (NEW) core/snapshots.py   # Snapshot Regression Harness (metrics & equity_curve) + Diff + Baseline Update
 │  (NEW) core/decision_card_repo.py # JSON Persistenz für DecisionCards (data/decision_cards.json)
+│  (NEW) core/testqueue.py   # Parallele/ persistente Testqueue (JSONL + Output Files, Retry, Truncation)
 ├─ data/                # (lokal, nicht versioniert erwartet) trades.csv, results/, optional notes/, cache/
 ├─ docs/
 │  ├─ CONTEXT/          # 10 Kontext-Dateien (Charter, Manifesto, Glossary, Schema, Decision Spec, RAG Policy, Test Strategy, UI Spec, Roadmap, Working Agreements)
@@ -17,12 +18,18 @@ VekBase/
 ├─ README.md            # Kurzstart (lokal-first)
 └─ requirements.txt     # Python Abhängigkeiten (leichtgewichtig)
 
-Not Implemented Yet (remaining backlog slice):
-- Embeddings / RAG (nur Keyword Retrieval vorhanden)
-- Erweiterte Sim Parameter (TP/SL/Kosten)
-- Live Quotes Cache
+Not Implemented / PARTIAL (Backlog Referenz):
+- Retrieval Filter & Snippet Qualität (ticker/as_of) (P1)
+- Erweiterte Sim Parameter (TP/SL/Kosten) (P1)
+- Unrealized Equity Curve Erweiterung (P1)
+- Erweiterte Pattern Analytics (PARTIAL – Basis implementiert) (P2)
+- Snapshot Regression Coverage Ausbau (P2)
+- Queue Aggregate Metrics & Retention Policy (P2)
+- Live Quotes Cache (optional P3)
+- Optionale Embeddings/RAG Ranking (Deferred)
 
 Konventionen:
-- Keine sys.path Hacks (pytest.ini steuert Pfad)
-- Reine Berechnungen in analytics, Persistenz explizit in sim/simple_walk.run_and_persist
-- Kontext-Sync: Roadmap = Quelle für offene Items; Charter/Test Strategy/UI Spec referenzieren nur
+- Keine sys.path Hacks (Packaging + pytest config)
+- Reine Berechnungen in analytics; Persistenz explizit in sim/simple_walk.run_and_persist & devtools (snapshots/benchmarks/testqueue) unter `data/devtools/`
+- Queue Persistenz auditierbar (append-only JSONL + getrennte Output Artefakte)
+- Kontext-Sync: Roadmap & Backlog (single source), andere Dateien referenzieren IDs nur summarisch

@@ -1,22 +1,24 @@
 # Roadmap (MVP → +RAG/LLM)
 
-MVP (P0-P3) Status: Basis implementiert (Charter, Schema, UI Grundfunktionen, realized Analytics, simple Sim, Tests).
-Kurzfristige Prioritäten (Aktualisiert):
-P0
- - UI SimResult Rückgabemismatch fixen
- - DecisionCard Feld-Erweiterung (action, risks, confidence)
+MVP (P0-P3) Status: Basis implementiert (Charter, Schema, UI Grundfunktionen, realized Analytics inkl. CAGR, simple Sim, DevTools Queue, Tests, DecisionCard Felder).
+Aktuelle Prioritäten (vereinheitlicht, detaillierte Begründungen im Backlog):
+P0 (none – aktuelle Basis stabil)
 P1
- - Retrieval Filter (ticker, as_of) + Snippet Qualität
+ - Retrieval Filter (ticker, as_of) & Snippet Qualität
  - Erweiterte Sim-Parameter (TP/SL/Kosten)
- - Architektur-Doku aktualisieren
+ - Architektur-Doku Folgepflege (laufend)
+ - Unrealized Equity Curve Erweiterung
 P2
- - Analytics: CAGR Berechnung
- - Unrealized Equity Curve + unrealized PnL Erweiterung
- - Pattern Analytics (Histogramme, Scatter)
- - Snapshot Regression Tests (Sim/Analytics)
- - DecisionCard/Retrieval UI Panels & Tests
+ - Erweiterte Pattern Analytics (beyond basic Histogram/Scatter)
+ - Snapshot Regression Coverage Ausbau
+ - DecisionCard/Retrieval UI Tests & Erweiterungen
+ - Queue Aggregate Metrics & Retention Policy
+P3
+ - Live Quotes Cache (optional)
+ - Optionale Embeddings/Rerank (RAG Erweiterung)
 
 Später: Live Quotes Cache, Embeddings, LLM Integration.
 
-Backlog Referenzen: #1 #2 #3 #4 #5 #6 #7 #8 #9 #10 — Details siehe tmp_backlogCollection.md
+Backlog Referenzen: Siehe konsolidierte Liste in `docs/DOCUMENTATION/tmp_backlogCollection.md` (IDs rotierend gepflegt, erledigte entfernt).
+Backlog: Silent Persistenz Error Handling + Status Erweiterungs-Entscheid (#P2-debt-testqueue) — siehe tmp_backlogCollection.md
 

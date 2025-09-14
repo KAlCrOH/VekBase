@@ -20,7 +20,7 @@
 #   Banner policy-relevant
 # ============================================================
 """
-from app.analytics.metrics import realized_equity_curve, aggregate_metrics, realized_equity_curve_with_unrealized
+from app.analytics.metrics import realized_equity_curve, aggregate_metrics, realized_equity_curve_with_unrealized, drawdown_curve
 from app.core.trade_model import validate_trade_dict
 from app.core.trade_repo import TradeRepository
 
@@ -70,3 +70,26 @@ def test_equity_curve_with_unrealized_no_mark_prices():
     base = realized_equity_curve(repo.all())
     ext = realized_equity_curve_with_unrealized(repo.all())
     assert base == ext  # no mark prices so no extension
+
+
+def test_drawdown_curve_basic():
+    # Synthetic small curve with a drawdown
+    from datetime import datetime
+    curve = [
+        (datetime(2024,1,1,9,0,0), 0.0),
+        (datetime(2024,1,1,10,0,0), 10.0),  # peak
+        (datetime(2024,1,1,11,0,0), 8.0),   # drawdown  -20%
+        (datetime(2024,1,1,12,0,0), 12.0),  # new peak
+    ]
+    dd = drawdown_curve(curve)
+    assert len(dd) == 4
+    # Third point should have negative drawdown_pct ~ -0.2
+    third = dd[2]
+    assert third['drawdown_pct'] < 0
+    # Peaks have 0 drawdown
+    assert dd[1]['drawdown_pct'] == 0
+    assert dd[3]['drawdown_pct'] == 0
+
+
+def test_drawdown_curve_empty():
+    assert drawdown_curve([]) == []

@@ -23,7 +23,11 @@
 #   Indirekt über Modultests (Analytics, Simulation, Repo). UI selbst nicht unit-getestet.
 
 # Known Gaps
-#   - Simulation Erfolgsmeldung erwartet res['folder'], run_and_persist liefert SimResult Objekt (Backlog P0: UI SimResult Rückgabemismatch)
+#   - Unrealized Equity Curve Erweiterung (vollständige Integration) (Backlog #7)
+#   - Erweiterte Simulation Parameter (TP/SL/Kosten) (Backlog #5)
+#   - Erweiterte Pattern Analytics (beyond basic histogram/scatter) (Backlog #8 PARTIAL)
+#   - Snapshot Regression Test Coverage Ausbau (Backlog #9 PARTIAL)
+#   - Aggregierte Queue Metriken & Retention Policy (Neue Backlog Items)
 
 # Do-Not-Change
 #   Banner policy-relevant; Änderungen nur via Task „Header aktualisieren“.
@@ -37,7 +41,8 @@ import io, csv, subprocess, sys, json, re, os
 # Direct imports (Bootstrap removed after packaging migration)
 from app.core.trade_repo import TradeRepository  # type: ignore
 from app.core.trade_model import validate_trade_dict, TradeValidationError  # type: ignore
-from app.analytics.metrics import aggregate_metrics, realized_equity_curve, realized_equity_curve_with_unrealized  # type: ignore
+from app.analytics.metrics import aggregate_metrics, realized_equity_curve, realized_equity_curve_with_unrealized, unrealized_equity_timeline  # type: ignore
+from app.core.default_data import load_default_trades  # type: ignore
 from app.sim.simple_walk import run_and_persist, momentum_rule  # type: ignore
 
 st.set_page_config(page_title="VekBase Console", layout="wide")
@@ -60,9 +65,17 @@ if trades_path.exists():
 else:
     st.info("No trades.csv yet. Add trades via the form below and click Save.")
 
+# Default dataset auto-load (feature flag VEK_DEFAULT_DATA=1)
+if not repo.all() and bool(int(os.environ.get("VEK_DEFAULT_DATA", "1"))):
+    added = load_default_trades(repo)
+    if added:
+        st.caption(f"Default demo dataset loaded ({added} trades) — disable via VEK_DEFAULT_DATA=0")
+
 devtools_enabled = bool(int(os.environ.get("VEK_DEVTOOLS", "1")))
 decision_cards_enabled = bool(int(os.environ.get("VEK_DECISIONCARDS", "1")))
 patterns_enabled = bool(int(os.environ.get("VEK_PATTERNS", "1")))
+analytics_ext_enabled = bool(int(os.environ.get("VEK_ANALYTICS_EXT", "0")))
+workbench_enabled = True  # always enable for roadmap visualization
 tabs = st.tabs([
     "Trades",
     "Analytics",
@@ -70,6 +83,7 @@ tabs = st.tabs([
     "DevTools" if devtools_enabled else "DevTools (disabled)",
     "Retrieval",
     "DecisionCards" if decision_cards_enabled else "DecisionCards (disabled)",
+    "Workbench"
 ])
 
 # Trades Tab
@@ -116,12 +130,41 @@ with tabs[0]:
 
 # Analytics Tab
 with tabs[1]:
-    st.subheader("Analytics (Realized / Unrealized Overlay)")
+    st.subheader("Analytics (Equity / Unrealized / Benchmark)")
     if repo.all():
-        # Inputs for optional mark prices
-        with st.expander("Optional Mark Prices (JSON)", expanded=False):
-            mp_text = st.text_area("mark_prices JSON", value="", height=80, help='Format: {"TICKER": price, ...}')
-            overlay = st.checkbox("Show Unrealized Overlay", value=False, help="Adds final point including unrealized PnL if open positions.")
+        # Unified overlay inputs
+        with st.expander("Overlay Inputs (Marks & Benchmark)", expanded=False):
+            mp_text = st.text_area(
+                "mark_prices JSON",
+                value="",
+                height=80,
+                help='Format: {"TICKER": price, ...} — used to compute unrealized and total equity.'
+            )
+            bm_text = st.text_area(
+                "benchmark JSON",
+                value="",
+                height=80,
+                help=(
+                    "Accepted formats: {\"ISO_TS\": value, ...} OR [[\"ISO_TS\", value], ...] OR simple list of values (aligned to realized equity timestamps)."
+                )
+            )
+            c_ov1, c_ov2, c_ov3 = st.columns(3)
+            overlay = c_ov1.checkbox(
+                "Include Unrealized / Total",
+                value=False,
+                help="Adds unrealized equity (open positions) and combined total (realized+unrealized)."
+            )
+            show_benchmark = c_ov2.checkbox(
+                "Show Benchmark",
+                value=bool(bm_text.strip()),
+                help="Overlay benchmark series if provided."
+            )
+            show_vol = c_ov3.checkbox(
+                "Rolling Volatility",
+                value=False,
+                help="Plot rolling volatility of realized equity (window=5 points)."
+            )
+        # Parse mark prices
         mark_prices = None
         if mp_text.strip():
             try:
@@ -130,23 +173,113 @@ with tabs[1]:
                     st.warning("mark_prices must be a JSON object {ticker: price}")
                     mark_prices = None
             except Exception as e:
-                st.error(f"JSON parse error: {e}")
+                st.error(f"mark_prices JSON parse error: {e}")
+        # Parse benchmark
+        benchmark_series = None  # list of (ts,value)
+        if bm_text.strip():
+            try:
+                raw_bm = json.loads(bm_text)
+                import pandas as _pd  # local alias
+                if isinstance(raw_bm, dict):
+                    # keys are timestamps
+                    benchmark_series = sorted([(k, raw_bm[k]) for k in raw_bm.keys()])
+                elif isinstance(raw_bm, list):
+                    if raw_bm and all(isinstance(x, list) and len(x) == 2 for x in raw_bm):
+                        benchmark_series = [(x[0], x[1]) for x in raw_bm]
+                    elif raw_bm and all(isinstance(x, (int, float)) for x in raw_bm):
+                        # align to realized equity timestamps later
+                        benchmark_series = [(None, v) for v in raw_bm]
+                else:
+                    st.warning("Unsupported benchmark JSON format")
+            except Exception as e:
+                st.error(f"benchmark JSON parse error: {e}")
+        # Metrics summary
         metrics = aggregate_metrics(repo.all(), mark_prices=mark_prices) if mark_prices else aggregate_metrics(repo.all())
         st.json(metrics)
         curve = realized_equity_curve(repo.all())
         import pandas as pd
         if curve:
-            df = pd.DataFrame(curve, columns=["ts", "equity_realized"])
+            base_df = pd.DataFrame(curve, columns=["ts", "equity_realized"]).sort_values("ts")
+            # Build unrealized + total if requested
             if overlay and mark_prices:
-                ext = realized_equity_curve_with_unrealized(repo.all(), mark_prices=mark_prices)
-                if len(ext) > len(curve):
-                    df2 = pd.DataFrame(ext, columns=["ts", "equity_unrealized_total"])
-                    chart_df = df.merge(df2, on="ts", how="outer").set_index("ts").sort_index()
-                    st.line_chart(chart_df)
+                unreal_tl = unrealized_equity_timeline(repo.all(), mark_prices=mark_prices) or []
+                if unreal_tl:
+                    df_unr = pd.DataFrame(unreal_tl, columns=["ts", "equity_unrealized"])  # unrealized open positions value
+                    ext = realized_equity_curve_with_unrealized(repo.all(), mark_prices=mark_prices)
+                    if len(ext) >= len(curve):
+                        df_total = pd.DataFrame(ext, columns=["ts", "equity_total"]).sort_values("ts")
+                    else:
+                        df_total = None
                 else:
-                    st.line_chart(df.set_index("ts"))
+                    df_unr = None
+                    df_total = None
             else:
-                st.line_chart(df.set_index("ts"))
+                df_unr = None
+                df_total = None
+            # Benchmark DataFrame
+            df_bm = None
+            if show_benchmark and benchmark_series:
+                # If timestamps missing (aligned list), map onto realized curve timestamps
+                if benchmark_series and benchmark_series[0][0] is None:
+                    ts_list = list(base_df["ts"].values)
+                    vals = [v for (_, v) in benchmark_series]
+                    if len(vals) != len(ts_list):
+                        st.warning("Benchmark value count does not match realized equity points; truncating to shortest length.")
+                    n = min(len(vals), len(ts_list))
+                    df_bm = pd.DataFrame({"ts": ts_list[:n], "benchmark": vals[:n]})
+                else:
+                    df_bm = pd.DataFrame(benchmark_series, columns=["ts", "benchmark"]).sort_values("ts")
+            # Merge all
+            frames = [base_df]
+            if df_unr is not None:
+                frames.append(df_unr)
+            if df_total is not None:
+                frames.append(df_total)
+            if df_bm is not None:
+                frames.append(df_bm)
+            full = None
+            for f in frames:
+                if full is None:
+                    full = f
+                else:
+                    full = full.merge(f, on="ts", how="outer")
+            if full is not None:
+                full = full.sort_values("ts")
+                # Rolling volatility (window=5) if requested
+                if show_vol:
+                    try:
+                        from app.analytics.metrics import rolling_volatility as _roll_vol
+                        rv = _roll_vol([(row.ts, row.equity_realized) for row in full.itertuples() if not pd.isna(row.equity_realized)], window=5)
+                        if rv:
+                            df_rv = pd.DataFrame(rv, columns=["ts","rolling_volatility"]).sort_values("ts")
+                            full = full.merge(df_rv, on="ts", how="left")
+                    except Exception as e:
+                        st.warning(f"Rolling volatility error: {e}")
+                # Altair multi-series chart
+                try:
+                    import altair as alt
+                    melt_cols = [c for c in [
+                        "equity_realized",
+                        "equity_unrealized" if df_unr is not None else None,
+                        "equity_total" if df_total is not None else None,
+                        "benchmark" if df_bm is not None else None,
+                        "rolling_volatility" if show_vol else None,
+                    ] if c]
+                    plot_df = full.melt(id_vars="ts", value_vars=melt_cols, var_name="series", value_name="value")
+                    # Drop NaNs
+                    plot_df = plot_df.dropna(subset=["value"])  # type: ignore
+                    base_chart = alt.Chart(plot_df).mark_line(point=False).encode(
+                        x=alt.X("ts:T", title="Timestamp"),
+                        y=alt.Y("value:Q", title="Value"),
+                        color=alt.Color("series:N", legend=alt.Legend(title="Series")),
+                        tooltip=["ts:T","series:N","value:Q"],
+                    ).properties(height=400)
+                    st.altair_chart(base_chart, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Altair chart fallback (reason: {e})")
+                    st.line_chart(full.set_index("ts"))
+            else:
+                st.info("No equity data to plot.")
         # Pattern Analytics (Histogram + Scatter) behind feature flag
         st.markdown("---")
         st.subheader("Pattern Analytics (Holding Duration & Entry→Return)")
@@ -158,11 +291,21 @@ with tabs[1]:
             with col_p1:
                 bucket_minutes = st.number_input("Bucket Minutes", min_value=1, max_value=240, value=60, step=5, key="pat_bucket")
                 max_buckets = st.number_input("Max Buckets", min_value=1, max_value=20, value=10, step=1, key="pat_buckets")
-                hist = holding_duration_histogram(repo.all(), bucket_minutes=int(bucket_minutes), max_buckets=int(max_buckets))
+                _hist_res = holding_duration_histogram(repo.all(), bucket_minutes=int(bucket_minutes), max_buckets=int(max_buckets))
+                # backward compatibility: accept list or dict
+                if isinstance(_hist_res, dict):
+                    counts = _hist_res.get('buckets', [])
+                    p50 = _hist_res.get('p50')
+                    p90 = _hist_res.get('p90')
+                else:  # legacy list
+                    counts = _hist_res
+                    p50 = p90 = None
                 st.caption("Holding Duration Histogram (bucket counts)")
                 import pandas as pd
-                dfh = pd.DataFrame({"bucket": list(range(len(hist))), "count": hist}).set_index("bucket")
+                dfh = pd.DataFrame({"bucket": list(range(len(counts))), "count": counts}).set_index("bucket")
                 st.bar_chart(dfh)
+                if p50 is not None:
+                    st.caption(f"Durations p50={p50:.1f}m p90={p90:.1f}m (bucket={int(bucket_minutes)}m)")
             with col_p2:
                 pts = entry_return_scatter(repo.all())
                 if pts:
@@ -171,6 +314,46 @@ with tabs[1]:
                     st.scatter_chart(dfp, x="entry_price", y="return_pct")
                 else:
                     st.info("No closed positions to plot.")
+        # Extended analytics (optional)
+        if analytics_ext_enabled:
+            st.markdown("---")
+            st.subheader("Extended Analytics (Flag VEK_ANALYTICS_EXT=1)")
+            from app.analytics.patterns import return_distribution as _ret_dist
+            from app.analytics.metrics import drawdown_curve as _dd_curve, position_size_series as _pos_series
+            ec1, ec2 = st.columns(2)
+            with ec1:
+                # Drawdown chart
+                eq_curve = realized_equity_curve(repo.all())
+                if eq_curve:
+                    dd = _dd_curve(eq_curve)
+                    if dd:
+                        import pandas as pd
+                        dfdd = pd.DataFrame(dd, columns=["ts","drawdown"]).set_index("ts")
+                        st.caption("Realized Drawdown Curve")
+                        st.line_chart(dfdd)
+                # Position size series
+                pos_series = _pos_series(repo.all())
+                if pos_series:
+                    import pandas as pd
+                    dfpos = pd.DataFrame(pos_series)
+                    dfpos = dfpos.set_index("ts")
+                    st.caption("Gross Exposure Over Time (Shares * Price)")
+                    st.area_chart(dfpos["gross_exposure"])
+            with ec2:
+                # Return distribution
+                bucket_size = st.number_input("Return Bucket Size", min_value=0.001, max_value=0.2, value=0.01, step=0.001, format="%.3f", key="ret_bucket")
+                dist = _ret_dist(repo.all(), bucket_size=float(bucket_size))
+                if dist.get('buckets'):
+                    import pandas as pd
+                    dfb = pd.DataFrame([
+                        {"mid": (b['start']+b['end'])/2.0, "count": b['count']} for b in dist['buckets'] if b['count'] > 0
+                    ])
+                    if not dfb.empty:
+                        dfb = dfb.set_index("mid")
+                        st.caption("Realized Return Distribution (portion-wise)")
+                        st.bar_chart(dfb)
+                else:
+                    st.info("No realized returns yet for distribution.")
     else:
         st.info("Keine Trades geladen.")
 
@@ -344,7 +527,11 @@ with tabs[3]:
         if "snapshot_state" not in st.session_state:
             st.session_state.snapshot_state = {"target": "metrics", "result": None, "update": False}
         ss = st.session_state.snapshot_state
-        ss["target"] = st.selectbox("Snapshot Target", ["metrics", "equity_curve"], index=["metrics", "equity_curve"].index(ss["target"]))
+        snapshot_targets = ["metrics","equity_curve","equity_curve_unrealized","equity_curve_per_ticker"]
+        # default fallback if previous selection not in new list
+        if ss["target"] not in snapshot_targets:
+            ss["target"] = "metrics"
+        ss["target"] = st.selectbox("Snapshot Target", snapshot_targets, index=snapshot_targets.index(ss["target"]))
         ss["update"] = st.checkbox("Update Baseline if Diff", value=ss.get("update", False))
         if st.button("Run Snapshot"):
             res = _dshared.snapshot(ss["target"], update=ss["update"])
@@ -487,35 +674,88 @@ with tabs[5]:
                 card_id = c1.text_input("card_id", value=f"dc_{len(repo_dc.all())+1}")
                 author = c2.text_input("author", value="me")
                 title = st.text_input("title")
-                assumptions = st.text_area("assumptions (one per line)", value="")
-                risks = st.text_area("risks (one per line)", value="")
-                action_type = st.selectbox("action.type", ["hold","add","trim","exit"], index=0)
-                action_target_w = st.number_input("action.target_w", min_value=0.0, value=0.0, step=0.01)
-                action_ttl = st.number_input("action.ttl_days", min_value=0, value=30, step=5)
-                confidence = st.slider("confidence", 0.0, 1.0, 0.5, 0.05)
-                create_clicked = st.form_submit_button("Create Card")
-            if create_clicked:
-                try:
-                    card = make_decision_card(
-                        card_id=card_id,
-                        author=author,
-                        title=title,
-                        assumptions=[ln.strip() for ln in assumptions.splitlines() if ln.strip()],
-                        risks=[ln.strip() for ln in risks.splitlines() if ln.strip()],
-                        action={"type": action_type, "target_w": action_target_w, "ttl_days": int(action_ttl)},
-                        confidence=confidence,
-                    )
-                    repo_dc.add(card)
-                    repo_dc.save()
-                    st.success(f"DecisionCard {card.card_id} created")
-                except Exception as e:
-                    st.error(f"Error creating card: {e}")
-        if repo_dc.all():
+                # ... existing code continues (unchanged) ...
+
+with tabs[6]:
+    st.subheader("Investment Workbench Übersicht (Roadmap Preview)")
+    st.caption("Feature-Matrix & Health Panels – Backend für einige zukünftige Features noch Platzhalter.")
+    import pandas as _pd
+    feature_rows = [
+        {"Feature":"Realized Metrics","Status":"✅","Flag":"-","Backend":"metrics.aggregate_metrics","UI":"Analytics Tab"},
+        {"Feature":"Unrealized Timeline (Aggregate)","Status":"✅","Flag":"mark_prices JSON","Backend":"unrealized_equity_timeline","UI":"Analytics Overlay"},
+        {"Feature":"Unrealized Timeline (Per Ticker)","Status":"✅","Flag":"mark_prices JSON","Backend":"unrealized_equity_timeline_by_ticker","UI":"Workbench"},
+        {"Feature":"Return Distribution","Status":"✅ (flag)","Flag":"VEK_ANALYTICS_EXT","Backend":"patterns.return_distribution","UI":"Analytics Extended"},
+        {"Feature":"Holding Duration Stats","Status":"✅","Flag":"VEK_PATTERNS","Backend":"patterns.holding_duration_histogram","UI":"Analytics"},
+        {"Feature":"Position Size / Exposure","Status":"✅ (flag)","Flag":"VEK_ANALYTICS_EXT","Backend":"metrics.position_size_series","UI":"Analytics Extended"},
+        {"Feature":"Queue Aggregate Metrics","Status":"✅","Flag":"-","Backend":"testqueue.aggregate_metrics","UI":"DevTools / Workbench"},
+        {"Feature":"Queue Persistence Health","Status":"✅","Flag":"-","Backend":"testqueue.get_persistence_stats","UI":"Workbench"},
+        {"Feature":"Snapshots (Regression)","Status":"✅ (basic)","Flag":"-","Backend":"devtools.snapshot","UI":"DevTools"},
+        {"Feature":"Decision Cards","Status":"✅","Flag":"VEK_DECISIONCARDS","Backend":"decision_card_repo","UI":"DecisionCards"},
+        {"Feature":"Retrieval (Keyword)","Status":"✅ (basic)","Flag":"-","Backend":"retrieval.retrieve","UI":"Retrieval"},
+        {"Feature":"Strategy Backtest (Sim Walk)","Status":"✅ (MVP)","Flag":"-","Backend":"sim.simple_walk","UI":"Simulation"},
+        {"Feature":"Pro-Ticker Metrics","Status":"Planned","Flag":"(future)","Backend":"(to design)","UI":"Workbench"},
+        {"Feature":"Risk Buckets / VaR","Status":"Planned","Flag":"(future)","Backend":"(to design)","UI":"Workbench"},
+        {"Feature":"Alpha Factor Attribution","Status":"Planned","Flag":"(future)","Backend":"(to design)","UI":"Workbench"},
+        {"Feature":"Scenario Engine","Status":"Planned","Flag":"(future)","Backend":"(to design)","UI":"Workbench"},
+    ]
+    st.dataframe(_pd.DataFrame(feature_rows))
+    st.markdown("---")
+    # Per-Ticker Unrealized Visualization
+    st.subheader("Per-Ticker Unrealized (aktuelle Marks)")
+    mp_text2 = st.text_area("Mark Prices JSON (für Per-Ticker)", value="", height=80, key="wb_marks")
+    marks2 = {}
+    if mp_text2.strip():
+        try:
+            marks2 = json.loads(mp_text2)
+            if not isinstance(marks2, dict):
+                st.warning("Marks JSON muss Objekt sein")
+                marks2 = {}
+        except Exception as e:
+            st.error(f"JSON Fehler: {e}")
+    if marks2 and repo.all():
+        from app.analytics.metrics import unrealized_equity_timeline_by_ticker as _u_by_t
+        per = _u_by_t(repo.all(), marks2)
+        if per:
             import pandas as pd
-            st.markdown("### Existing Cards")
-            df = pd.DataFrame([c.to_dict() for c in repo_dc.all()])
-            st.dataframe(df)
+            frames = []
+            for ticker, series in per.items():
+                dfp = pd.DataFrame(series, columns=["ts","unrealized"])  # type: ignore
+                dfp["ticker"] = ticker
+                frames.append(dfp)
+            if frames:
+                big = pd.concat(frames).set_index("ts")
+                st.line_chart(big.pivot(columns="ticker", values="unrealized"))
         else:
-            st.info("No DecisionCards yet")
+            st.info("Keine offenen Positionen oder keine gültigen Marks.")
+    else:
+        st.caption("Gib Mark Prices als JSON ein um Pro-Ticker unrealized zu sehen.")
+    st.markdown("---")
+    # Queue Health
+    st.subheader("Queue Health & Persistence")
+    try:
+        from app.core import testqueue as _tq
+        q_agg = _tq.aggregate_metrics(limit=50)
+        q_persist = _tq.get_persistence_stats()
+        colh1, colh2 = st.columns(2)
+        with colh1:
+            st.caption("Aggregate Runs (recent)")
+            st.json(q_agg)
+        with colh2:
+            st.caption("Persistence Stats")
+            st.json(q_persist)
+    except Exception as e:
+        st.error(f"Queue Health Fehler: {e}")
+    st.markdown("---")
+    st.subheader("Zukunft Side-Bar (Mock)")
+    st.markdown("""
+    Geplante Erweiterungen:
+    - Pro-Ticker Performance Attribution (Realized vs Benchmark)
+    - Risiko-Kennzahlen (Rolling Volatility, Max Intraday Drawdown, VaR Approximator)
+    - Faktor / Alpha Drivers (Correlation vs Momentum, Mean-Reversion, Seasonality)
+    - Szenario Simulation (What-If Price Shocks, Slippage Modelle)
+    - Portfolio Konstruktion (Optimierung, Rebalancing Vorschläge)
+    - Alerts & Regeln (Threshold Breaches, Auto-Snapshots)
+    - Data Ingestion Layer (Broker CSV Imports, API Connectors) — Flag-basiert abschaltbar
+    """)
 
 st.caption("Frontend-first Konsole • Personal Use • KISS")

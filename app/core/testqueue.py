@@ -1,32 +1,40 @@
 """
 # ============================================================
 # Context Banner — testqueue | Category: core
-# Purpose: Lightweight in-process Test-Run Queue & Status Tracker für Admin/Investor Dev-Tools UI.
+# Purpose: In‑process (optional parallel) Test-Run Queue mit Persistenz & Audit Trail für DevTools UIs.
 
 # Contracts
-#   submit_run(k_expr:str|None, module_substr:str|None, nodeids:list[str]|None) -> str (run_id)
-#   get_status(run_id:str) -> dict(status,passed,failed,stdout,stderr,queued_at,started_at,finished_at)
-#   list_runs(limit:int=20) -> list[dict]
-#   run_immediate(k_expr|module_substr|nodeids) -> dict  (Convenience: synchroner Aufruf bypass queue)
-#
+#   submit_run(k_expr|module_substr|nodeids) -> run_id(str)
+#   get_status(run_id) -> dict(status, passed, failed, stdout, stderr, *_timestamps, truncation flags, duration_s)
+#   list_runs(limit, status?, include_persisted: bool=True) -> List[dict]
+#   process_next() -> run_id|None (Legacy Poll Mode)
+#   ensure_workers() -> int (spawn worker threads gemäß Env `VEK_TESTQUEUE_WORKERS`)
+#   get_full_output(run_id) -> vollständige stdout/stderr (rekonstruiert aus Persistenz falls truncation)
+#   retry_run(run_id) -> new_run_id|None
+
 # Status Lifecycle
-#   queued -> running -> (passed|failed|error)
-#     error: spawn/timeout Fehler
-#
+#   queued -> running -> passed | failed | error
+#   (error = interner Ausführungsfehler / Spawn / Timeout / unerwartete Exception)
+
 # Invariants
-#   - Single-threaded (kein paralleler Worker); Ausführung erfolgt beim Poll über process_next().
-#   - Keine externen Nebenwirkungen außer pytest Subprocess.
-#   - Deterministisch für gleiche Queue-Reihenfolge.
-#
+#   - Parallelität über Worker Threads (0 = deaktiviert → Poll-Modus) steuerbar via Env `VEK_TESTQUEUE_WORKERS`.
+#   - Append-only Persistenz: JSONL (`data/devtools/testqueue_runs.jsonl`) + vollständige Outputs (`data/devtools/testqueue_outputs/`).
+#   - Truncation von stdout/stderr via Env `VEK_TESTQUEUE_MAX_OUTPUT` (Default 4000) mit Flag + optionaler vollständiger Dateipersistenz.
+#   - Keine Netzwerkzugriffe; ausschließlich lokaler pytest Subprocess.
+#   - Deterministische Reihenfolge FIFO für queued Runs.
+
 # Dependencies
-#   Internal: app.core.devtools
-#   External: stdlib
-#
+#   Internal: app.core.devtools (Run/Parse), stdlib (threading, json, atexit)
+#   External: keine weiteren.
+
 # Tests
-#   tests/test_testqueue.py (added in increment)
-#
+#   tests/test_testqueue*.py (Basis, Parallel, Truncation, Retry/Full Output)
+
+# Side-Effects
+#   Writes: data/devtools/testqueue_runs.jsonl; data/devtools/testqueue_outputs/*.out
+
 # Do-Not-Change
-#   Banner policy-relevant
+#   Banner policy-relevant (Änderungen nur via „Header aktualisieren“ Task)
 # ============================================================
 """
 from __future__ import annotations
@@ -76,15 +84,95 @@ _OUTPUT_DIR = os.path.join(_BASE_DIR, "testqueue_outputs")
 os.makedirs(_OUTPUT_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(_PERSIST_PATH), exist_ok=True)
 
+# Persistence error tracking (debt item resolution)
+_PERSIST_ERRORS_TOTAL = 0
+_PERSIST_LAST_ERROR: str | None = None
+_PERSIST_LAST_TS: float | None = None
+
+
+def _apply_retention():
+    """Retention Policy (Increment: queue retention).
+    Controlled via env vars:
+      VEK_TESTQUEUE_MAX_RUNS (int>0) -> keep at most this many finished runs in JSONL (truncate oldest lines)
+      VEK_TESTQUEUE_MAX_BYTES (int>0) -> best-effort cap for outputs directory total size (delete oldest *_stdout.out/_stderr.out pairs)
+    Silent failures avoided: exceptions propagated only as return (ignored by caller) to keep queue running.
+    """
+    max_runs_raw = os.environ.get("VEK_TESTQUEUE_MAX_RUNS")
+    max_bytes_raw = os.environ.get("VEK_TESTQUEUE_MAX_BYTES")
+    try:
+        max_runs = int(max_runs_raw) if max_runs_raw else None
+        if max_runs is not None and max_runs <= 0:
+            max_runs = None
+    except Exception:
+        max_runs = None
+    try:
+        max_bytes = int(max_bytes_raw) if max_bytes_raw else None
+        if max_bytes is not None and max_bytes <= 0:
+            max_bytes = None
+    except Exception:
+        max_bytes = None
+    # Truncate JSONL by lines
+    if max_runs and os.path.exists(_PERSIST_PATH):
+        try:
+            with open(_PERSIST_PATH, "r", encoding="utf-8") as f:
+                lines = [ln for ln in f.readlines() if ln.strip()]
+            if len(lines) > max_runs:
+                # Keep most recent max_runs (end of file are newest by append semantics)
+                kept = lines[-max_runs:]
+                with open(_PERSIST_PATH, "w", encoding="utf-8") as fw:
+                    fw.writelines([ln if ln.endswith("\n") else ln+"\n" for ln in kept])
+        except Exception:
+            # Best-effort; do not raise (queue not critical infra)
+            pass
+    # Cap outputs directory size
+    if max_bytes:
+        try:
+            files = []
+            for p in pathlib.Path(_OUTPUT_DIR).glob("*_stdout.out"):
+                stem = p.name[:-11]  # remove _stdout.out
+                stderr_path = p.parent / f"{stem}_stderr.out"
+                size = p.stat().st_size + (stderr_path.stat().st_size if stderr_path.exists() else 0)
+                mtime = p.stat().st_mtime
+                files.append((mtime, size, stem, p, stderr_path))
+            total = sum(f[1] for f in files)
+            if total > max_bytes:
+                # delete oldest until under threshold
+                for mtime, size, stem, p_stdout, p_stderr in sorted(files, key=lambda x: x[0]):
+                    try:
+                        if p_stdout.exists():
+                            p_stdout.unlink()
+                        if p_stderr.exists():
+                            p_stderr.unlink()
+                    except Exception:
+                        pass
+                    total -= size
+                    if total <= max_bytes:
+                        break
+        except Exception:
+            pass
+
 
 def _persist_run(run: _QueuedRun):
+    global _PERSIST_ERRORS_TOTAL, _PERSIST_LAST_ERROR, _PERSIST_LAST_TS
     try:
         with open(_PERSIST_PATH, "a", encoding="utf-8") as f:
             json.dump(run.to_dict(), f, ensure_ascii=False)
             f.write("\n")
-    except Exception:
-        # Persistence best-effort; ignore errors
-        pass
+        _apply_retention()  # enforce after each append
+    except Exception as e:
+        # Record error statistics instead of silent pass
+        _PERSIST_ERRORS_TOTAL += 1
+        _PERSIST_LAST_ERROR = str(e)[:500]
+        _PERSIST_LAST_TS = time.time()
+
+def get_persistence_stats() -> Dict[str, object]:
+    """Return counters for persistence layer health."""
+    return {
+        "errors_total": _PERSIST_ERRORS_TOTAL,
+        "last_error": _PERSIST_LAST_ERROR,
+        "last_error_ts": _PERSIST_LAST_TS,
+        "persist_path": _PERSIST_PATH,
+    }
 
 
 def _load_persisted(limit: int) -> List[Dict]:
@@ -246,8 +334,78 @@ def retry_run(run_id: str) -> str | None:
 
 
 __all__ = [
-    "submit_run","get_status","list_runs","process_next","run_immediate","ensure_workers","shutdown_workers","get_full_output","retry_run"
+    "submit_run","get_status","list_runs","process_next","run_immediate","ensure_workers","shutdown_workers","get_full_output","retry_run","aggregate_metrics","get_persistence_stats","_reset_state_for_tests"
 ]
+
+# --- Aggregation (Increment: queue aggregate metrics) ---
+def aggregate_metrics(limit: int = 100) -> Dict[str, float | int | str | None]:
+    """Compute simple aggregate metrics over recent finished runs (in-memory only).
+    Args:
+      limit: number of most recent finished runs from _HISTORY (tail) to include.
+    Returns dict with counts and rates; empty values when no finished runs.
+    Notes:
+      - Uses only in-process state (keine JSONL Re-Reads) to stay lightweight/auditierbar.
+      - Rates are 0.0 when denominator = 0.
+    """
+    with _LOCK:
+        finished = [r for r in _HISTORY][-limit:]
+    total = len(finished)
+    if total == 0:
+        return {
+            "total_runs": 0,
+            "mean_duration_s": None,
+            "median_duration_s": None,
+            "p95_duration_s": None,
+            "pass_rate": 0.0,
+            "fail_rate": 0.0,
+            "error_rate": 0.0,
+            "last_run_id": "",
+        }
+    passed = sum(1 for r in finished if r.status == "passed")
+    failed = sum(1 for r in finished if r.status == "failed")
+    errored = sum(1 for r in finished if r.status == "error")
+    durations = [r.duration_s for r in finished if isinstance(r.duration_s, (int,float))]
+    mean_dur = round(sum(durations)/len(durations), 4) if durations else None
+    last_id = finished[-1].run_id if finished else ""
+    denom = float(total) if total else 1.0
+    # median & p95 helper
+    def _median(vals: List[float]) -> float | None:
+        if not vals:
+            return None
+        s = sorted(vals)
+        n = len(s)
+        mid = n // 2
+        if n % 2 == 1:
+            return s[mid]
+        return (s[mid-1] + s[mid]) / 2.0
+    def _p95(vals: List[float]) -> float | None:
+        if not vals:
+            return None
+        s = sorted(vals)
+        idx = int(0.95 * (len(s)-1))
+        return s[idx]
+    median_dur = _median(durations)
+    p95_dur = _p95(durations)
+    return {
+        "total_runs": total,
+        "mean_duration_s": mean_dur,
+        "median_duration_s": median_dur,
+        "p95_duration_s": p95_dur,
+        "pass_rate": round(passed/denom, 4),
+        "fail_rate": round(failed/denom, 4),
+        "error_rate": round(errored/denom, 4),
+        "last_run_id": last_id,
+    }
+
+# --- Test Support (Isolation) ---
+def _reset_state_for_tests():
+    """Clear in-memory queue/history for test isolation.
+    Does NOT touch persisted JSONL or outputs to avoid destructive side-effects.
+    Intended for use only inside unit tests where cross-test contamination occurs.
+    """
+    with _LOCK:
+        _QUEUE.clear()
+        _HISTORY.clear()
 
 # Auto-start workers if configured
 ensure_workers()

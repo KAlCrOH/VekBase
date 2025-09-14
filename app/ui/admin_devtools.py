@@ -1,16 +1,19 @@
 """
 # ============================================================
 # Context Banner — admin_devtools | Category: ui
-# Purpose: Streamlit-unabhängige Helper für Admin-DevTools (Test/Lint) – thin wrapper über core.devtools & core.linttools
+# Purpose: Streamlit-unabhängige Helper für Admin/Console DevTools (Tests, Lint, Benchmarks, Snapshots, Queued Test Runner)
 
 # Contracts
-#   run_test_subset(k_expr: str|None) -> dict(status, passed, failed, stdout, stderr)
-#     - Führt Tests via core.devtools.run_tests (Filter -k) aus
-#   run_lint_report() -> dict (LintReport.to_dict())
-#   Beide Funktionen: Keine Streamlit Abhängigkeit -> unit-testbar
+#   run_test_subset(k_expr) -> dict(status, passed, failed, stdout, stderr)
+#   run_lint_report() -> dict (LintReport)
+#   run_benchmark(target, repeat) -> dict (inkl. Persist Delta)
+#   run_snapshot(target, update) -> dict (Diff & Summary)
+#   Queue API: submit_test_run, list_test_runs(status?, include_persisted), get_test_run, get_test_run_output, retry_test_run
+#   Alle Funktionen Streamlit-frei → unit-testbar
 #
 # Invariants
 #   - Keine neuen externen Dependencies
+#   - Queue Persistenz: data/devtools/testqueue_runs.jsonl + testqueue_outputs/*.out (über core.testqueue)
 #   - Keine sys.path Hacks
 #   - Deterministisch für stabile Codebasis
 #
@@ -83,7 +86,7 @@ def list_benchmarks() -> Dict[str, str]:
 
 # Snapshot wrappers
 def list_snapshot_targets() -> list[str]:
-    return ["metrics", "equity_curve"]
+    return ["metrics", "equity_curve", "equity_curve_unrealized", "equity_curve_per_ticker"]
 
 
 def run_snapshot(target: str, update: bool = False) -> Dict[str, Any]:
@@ -101,7 +104,7 @@ __all__ = [
     "list_snapshot_targets",
     "run_snapshot",
     # queue api
-    "submit_test_run","get_test_run","list_test_runs","process_test_queue","ensure_testqueue_workers","get_test_run_output","retry_test_run",
+    "submit_test_run","get_test_run","list_test_runs","process_test_queue","ensure_testqueue_workers","get_test_run_output","retry_test_run","get_queue_aggregates",
 ]
 
 
@@ -134,3 +137,8 @@ def get_test_run_output(run_id: str):
 
 def retry_test_run(run_id: str):
     return _tq.retry_run(run_id)
+
+
+def get_queue_aggregates(limit: int = 100):
+    """Return simple aggregate metrics for recent finished runs (core.testqueue.aggregate_metrics)."""
+    return _tq.aggregate_metrics(limit=limit)

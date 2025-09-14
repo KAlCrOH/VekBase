@@ -13,7 +13,7 @@ Sections (Soll / Ist):
 
 Persistenz: meta.json (Parameter, Hash, final_cash) + equity.csv (Zeilen: ts,equity).
 
-Backlog: UI SimResult Rückgabemismatch (#1) ERLEDIGT, DecisionCard/Retrieval Panels (#10) offen — siehe tmp_backlogCollection.md
+Backlog: UI SimResult Rückgabemismatch (#1) ERLEDIGT, DecisionCard/Retrieval Panels (#10) PARTIAL (Tests & Erweiterungen offen) — siehe tmp_backlogCollection.md
 
 Increment A (prompt3_roadmap_implement):
 - Admin UI DevTools Sektion (Feature Flag `VEK_ADMIN_DEVTOOLS`, default=1)

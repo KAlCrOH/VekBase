@@ -6,7 +6,7 @@
 # Contracts
 #   Inputs: trades.csv falls vorhanden
 #   Outputs: Streamlit Darstellung (Metrics, Positions, optional Tabelle)
-#   Side-Effects: File I/O=read: data/trades.csv; Network=none
+#   Side-Effects: File I/O read: data/trades.csv; DevTools writes: data/devtools/* (bench baselines, snapshots, testqueue persistence); Network=none
 #   Determinism: deterministic (abhängig von Dateiinhalt)
 
 # Invariants
@@ -31,6 +31,7 @@ from datetime import datetime
 # Direct imports (Bootstrap removed after packaging migration)
 from app.core.trade_repo import TradeRepository  # type: ignore
 from app.analytics.metrics import aggregate_metrics  # type: ignore
+from app.core.default_data import load_default_trades  # type: ignore
 
 def load_trades(repo: TradeRepository, path: Path):
     if path.exists():
@@ -54,6 +55,12 @@ if trades_path.exists():
         st.error(f"Error loading trades: {e}")
 else:
     st.warning("No data/trades.csv found. Please add your trade file.")
+
+# Default dataset auto-load (VEK_DEFAULT_DATA=1)
+if not repo.all() and bool(int(os.environ.get("VEK_DEFAULT_DATA", "1"))):
+    added = load_default_trades(repo)
+    if added:
+        st.caption(f"Default demo dataset loaded ({added} trades) — disable via VEK_DEFAULT_DATA=0")
 
 if repo.all():
     metrics = aggregate_metrics(repo.all())
@@ -133,6 +140,16 @@ if devtools_flag:
                 st.dataframe(df[display_cols])
             except Exception:
                 st.json(rows)
+            # Aggregate metrics (new increment)
+            try:
+                from app.ui import admin_devtools as _adm_dt
+                ag = _adm_dt.get_queue_aggregates()
+                if ag.get("total_runs",0) > 0:
+                    st.caption(f"Aggregates: total={ag['total_runs']} pass_rate={ag['pass_rate']:.2f} fail_rate={ag['fail_rate']:.2f} error_rate={ag['error_rate']:.2f} mean_dur={ag['mean_duration_s'] if ag['mean_duration_s'] is not None else 'n/a'}s")
+                else:
+                    st.caption("Aggregates: (keine finished runs)")
+            except Exception as _e:
+                st.caption(f"Aggregates unavailable: {_e}")
             exp_c1, exp_c2, exp_c3 = st.columns([1,1,1])
             with exp_c1:
                 if st.button("Export JSON", key="adm_dt_queue_export_json"):

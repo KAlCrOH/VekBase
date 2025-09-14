@@ -40,9 +40,16 @@ def build_repo():
 
 def test_holding_duration_histogram():
     repo = build_repo()
-    hist = holding_duration_histogram(repo.all(), bucket_minutes=30, max_buckets=5)
-    assert len(hist) == 5
-    assert sum(hist) > 0  # at least one closed portion counted
+    hist_res = holding_duration_histogram(repo.all(), bucket_minutes=30, max_buckets=5)
+    # Accept dict (new) or list (legacy)
+    if isinstance(hist_res, dict):
+        buckets = hist_res['buckets']
+        assert len(buckets) == 5
+        assert sum(buckets) > 0
+        assert 'p50' in hist_res and 'p90' in hist_res
+    else:
+        assert len(hist_res) == 5
+        assert sum(hist_res) > 0  # at least one closed portion counted
 
 
 def test_entry_return_scatter():
@@ -59,8 +66,12 @@ def test_empty_trades_patterns():
     # Empty repository should yield zeroed histogram and empty scatter
     from app.core.trade_repo import TradeRepository
     empty_repo = TradeRepository()
-    hist = holding_duration_histogram(empty_repo.all(), bucket_minutes=15, max_buckets=4)
-    assert hist == [0,0,0,0]
+    hist_res = holding_duration_histogram(empty_repo.all(), bucket_minutes=15, max_buckets=4)
+    if isinstance(hist_res, dict):
+        assert hist_res['buckets'] == [0,0,0,0]
+        assert hist_res['count'] == 0
+    else:
+        assert hist_res == [0,0,0,0]
     pts = entry_return_scatter(empty_repo.all())
     assert pts == []
 

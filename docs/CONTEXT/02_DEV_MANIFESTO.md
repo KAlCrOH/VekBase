@@ -19,3 +19,4 @@ Performance:
 
 Testing:
 - Smoke-Tests (CSV lesen/schreiben, realized Kennzahlen, kleine Simulation). Unrealized/Pattern Tests folgen Roadmap.
+Backlog: Persistenz Fehlertransparenz & Queue Aggregatmetriken (#P2-debt-testqueue) — siehe tmp_backlogCollection.md

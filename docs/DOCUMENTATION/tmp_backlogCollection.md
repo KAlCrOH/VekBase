@@ -3,40 +3,58 @@
 Legende Typ: bug | debt | doc | test | design
 
 ### P0
-[#1][design] UI SimResult Rückgabemismatch — Modul: ui.console — Owner: <tbd> — STATUS: DONE
- - Kontext: console erwartete res['folder']; `SimResult` hatte kein Feld. Implementiert: folder Attribut + UI Zugriff.
- - Next: (none)
-[#2][design] DecisionCard Feld-Divergenz — Modul: core.decision_card — Owner: <tbd>
- - Kontext: Spec listet action{type,target_w,ttl_days}, risks, confidence – Dataclass enthält sie nicht.
- - Vorschlag Next Step: Optionale Felder hinzufügen (Default None), Tests erweitern (Backward-Kompatibilität sicherstellen).
+[DONE] UI SimResult Rückgabemismatch — Modul: ui.console
+[DONE] DecisionCard Feld-Divergenz — Modul: core.decision_card
 
 ### P1
-[#3][design] Retrieval Filter (ticker, as_of) — Modul: core.retrieval — Owner: <tbd>
- - Kontext: RAG Policy Ziel sieht Filter vor; Stub nur Keyword Count.
- - Vorschlag Next Step: retrieve(query, ticker=None, as_of=None, limit=3) + einfacher Dateiname/Zeit Filter.
-[#4][doc] Architektur-Doku Folgepflege — Modul: documentation — Owner: <tbd>
- - Kontext: Aktualisierte Struktur; zukünftige Feature-Erweiterungen müssen zeitnah eingepflegt werden.
- - Vorschlag Next Step: Review Checklist nach jedem P0/P1 Merge.
-[#5][design] Erweiterte Sim Parameter (TP/SL/Kosten) — Modul: sim.simple_walk — Owner: <tbd>
- - Kontext: UI Spec & Roadmap listen Parameter als offen.
- - Vorschlag Next Step: Parameter + Hash-Eingang definieren; Test für Reproduzierbarkeit.
+[P1][design] Retrieval Filter & Snippet Qualität — Modul: core.retrieval — Typ: DONE
+ * Implementiert: ticker & as_of Filter (Datumsvalidierung) + Limit Parameter im UI.
+ * Next: Relevanz Ranking (Heuristik: Gewichtung Trefferhäufigkeit + Feldgewicht), Option "excerpt" Länge begrenzen.
+[P1][design] Erweiterte Sim Parameter (TP/SL/Kosten) — Modul: sim.simple_walk — Typ: fehlend
+ * Nur Basis-Parameter vorhanden.
+ * Next: Parameter definieren (take_profit_pct, stop_loss_pct, fee_perc), Persistenz Hash erweitern, deterministischer Regressionstest.
+[P1][doc] Architektur-Doku Folgepflege — Modul: documentation — Typ: laufend
+ * Pflege nach jedem Increment; letzte Aktualisierung nach Benchmark Overlay & Snapshot Erweiterung noch offen.
+ * Next: Abschnitt "Analytics Layer" ergänzen (Benchmark / Volatilität), Snapshot Ziele-Liste aktualisieren.
+[P1][design] Unrealized Equity Curve Erweiterung — Modul: analytics.metrics/ui.console — Typ: DONE
+ * Implementiert: aggregate unrealized timeline, per‑Ticker timeline, Total (realized+unrealized) Punkt, Altair Multi-Series (realized/unrealized/total/benchmark/rolling_vol).
+ * Snapshot Targets erweitert (equity_curve_unrealized, equity_curve_per_ticker). Tests grün.
+ * Next: Farb- und Theme-Konfiguration zentralisieren (Dark/Light Paletten), optional Prozent-Normalisierung vs Startkapital.
 
 ### P2
-[#6][design] CAGR Berechnung — Modul: analytics.metrics — Owner: <tbd> — STATUS: DONE
- - Kontext: Realisierte Equity Curve Basis; CAGR Funktion implementiert + Tests (positiv & Edge).
- - Next: (none)
-[#7][design] Unrealized Equity Curve — Modul: analytics.metrics — Owner: <tbd>
- - Kontext: Nur realized Kurve implementiert; unrealized Kennzahlen geplant.
- - Vorschlag Next Step: Offene Positionen mit mark_prices fortschreiben (Baseline = realized curve).
-[#8][design] Pattern Analytics Grundfunktionen — Modul: analytics (patterns.py) — Owner: <tbd>
- - Kontext: UI Patterns Tab leer; benötigt Kernberechnungen (Histogram, Scatter Daten).
- - Vorschlag Next Step: Funktionen generate_holding_hist(trades) & entry_return_scatter(trades) + Tests.
-[#9][test] Snapshot Regression Tests — Modul: tests — Owner: <tbd> — STATUS: PARTIAL (DevTools Runner Basis vorhanden)
- - Kontext: Test Runner UI hinzugefügt (Filter/Status/Logs). Snapshot Mechanismus noch offen.
- - Next: Implement Golden File Hash/Fingerprint Tests (sim + metrics) in separatem Increment.
-[#10][design] DecisionCard / Retrieval UI Panels — Modul: ui.console — Owner: <tbd>
- - Kontext: Kein Tab für DecisionCards/Retrieval Anzeige.
- - Vorschlag Next Step: Neues Tab mit minimaler List-/Detailanzeige (keine LLM Funktionalität).
+[P2][design] Erweiterte Pattern Analytics — Modul: analytics.patterns — Typ: DONE
+ * Neu: overflow_count, p95, tail_left/right counts, return_distribution erweitert (p90/p95, tails).
+ * Next: Optionale Kennzahlen (skew, kurtosis) hinter Flag; Per-Ticker Pattern Aggregation.
+[P2][test] Snapshot Regression Coverage Ausbau — Modul: tests/snapshots — Typ: PARTIAL
+ * Targets erweitert: metrics, equity_curve, equity_curve_unrealized, equity_curve_per_ticker.
+ * Next: Simulation Equity Snapshot + Benchmark Overlay Baseline (normierter Start bei 0), Automatisierte Delta-Schwellwerte.
+[P2][design] Queue Aggregate Metrics — Modul: core.testqueue — Typ: DONE
+ * Median & p95 Duration ergänzt; Reset Helper für Testisolation; UI Anzeige.
+ * Next: Rolling Window Failure Rate (letzte N), SLA Warnschwelle (Duration > p95_baseline).
+[P2][design] Queue Retention Policy — Modul: core.testqueue — Typ: DONE
+ * Implementiert: _apply_retention mit VEK_TESTQUEUE_MAX_RUNS / VEK_TESTQUEUE_MAX_BYTES; Silent-Fails vermieden.
+ * Next: UI Konfig Panel + Metrik für aktuelle Output Dir Size.
+[P2][test] DecisionCard/Retrieval UI Tests — Modul: ui.console — Typ: offen
+ * Noch keine gezielten UI Smoke Tests.
+ * Next: Minimaler Headless Test (validate repository side-effects) + Retrieval Filter Assertions.
+[P2][debt] Testqueue Persistence Error Handling Verfeinerung — Modul: core.testqueue — Typ: DONE
+ * Counters + get_persistence_stats integriert; Workbench Panel zeigt Stats.
+ * Next: Error Rate Badge + Alert bei >0 Errors.
+[P2][debt] Redundante Status-Mapping Kommentare — Modul: core.testqueue — Typ: DEFER
+ * Belassen bis zusätzliche Stati (skipped/xfailed) implementiert.
+ * Next: Design Abschnitt "Extended Status Lifecycle" ergänzen.
+
+### P3
+[P3][design] Live Quotes Cache — Modul: (neues Submodul) — Typ: fehlend
+ * Bisher kein Feed; optional.
+ * Next: Interface Entwurf + Mock Implementation.
+[P3][design] Optionale Embeddings/RAG Ranking — Modul: retrieval — Typ: fehlend
+ * Policy erlaubt optional; aktuell rein lexical.
+ * Next: Evaluieren minimalen Embedding Layer (abschaltbar) – separate Entscheidung.
 
 ### Notes
-- Roadmap bleibt Quelle für Prioritäten. Diese Datei enthält normalisierte, ID-bezogene Items.
+- Datei aktualisiert nach Implementierung: Benchmark Overlay, Rolling Volatility, Snapshot Target Erweiterung, Queue p95/Median, Retention Policy, Pattern Tail Stats.
+- Roadmap referenziert high-level; diese Datei = Single Source für Feingranularen Status.
+- Default Demo Dataset (VEK_DEFAULT_DATA=1) belassen für schnelle Visualisierung.
+- Feature Flags aktuell: VEK_ANALYTICS_EXT, VEK_PATTERNS, VEK_DEVTOOLS, VEK_DECISIONCARDS, Retention via VEK_TESTQUEUE_MAX_RUNS / VEK_TESTQUEUE_MAX_BYTES.
+- Nächster Fokus (vorgeschlagen): Sim Parameter Erweiterung (P1), Snapshot Coverage für Benchmark, UI Test Smoke Pass.

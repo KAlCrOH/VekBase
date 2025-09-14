@@ -36,7 +36,12 @@ import json
 from typing import List, Dict, Any
 from .trade_repo import TradeRepository
 from .trade_model import validate_trade_dict
-from ..analytics.metrics import aggregate_metrics, realized_equity_curve
+from ..analytics.metrics import (
+    aggregate_metrics,
+    realized_equity_curve,
+    unrealized_equity_timeline,
+    unrealized_equity_timeline_by_ticker,
+)
 
 SCHEMA_VERSION = 1
 
@@ -55,11 +60,19 @@ def _sample_repo() -> TradeRepository:
 
 def create_snapshot(target: str) -> Dict[str, Any]:
     repo = _sample_repo()
+    # Deterministic synthetic mark prices for sample ticker(s)
+    mark_prices = {t.ticker: 15.0 for t in repo.all()}  # simple constant mark
     if target == "metrics":
-        data = aggregate_metrics(repo.all())
+        data = aggregate_metrics(repo.all(), mark_prices=mark_prices)
     elif target == "equity_curve":
         curve = realized_equity_curve(repo.all())
-        data = {"points": [(ts.isoformat(), v) for ts, v in curve]}
+        data = {"points": [[ts.isoformat(), v] for ts, v in curve]}
+    elif target == "equity_curve_unrealized":
+        timeline = unrealized_equity_timeline(repo.all(), mark_prices=mark_prices)
+        data = {"points": [[ts.isoformat(), v] for ts, v in timeline]}
+    elif target == "equity_curve_per_ticker":
+        per = unrealized_equity_timeline_by_ticker(repo.all(), mark_prices=mark_prices)
+        data = {ticker: [[ts.isoformat(), v] for ts, v in series] for ticker, series in per.items()}
     else:
         raise ValueError(f"Unknown snapshot target: {target}")
     return {"target": target, "data": data, "schema_version": SCHEMA_VERSION}

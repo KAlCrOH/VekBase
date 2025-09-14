@@ -15,8 +15,9 @@ Non-Goals:
 - Keine komplexe MLOps/Cloud.
 
 Success Criteria (MVP Status):
-- Implementiert: Trade Erfassung/Validierung, Basis-Kennzahlen (realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown, realized Equity Curve), einfache Walk-Forward-Simulation (Seed+Hash), Reproduzierbarkeit (Seed+Hash), Frontend-first Konsole (Pytest Runner).
-- Offene Punkte (Quelle: ROADMAP): CAGR, unrealized PnL/Equity Curve, Pattern Analytics, DecisionCards (erweitert), Retrieval Filter & RAG, erweiterte Sim-Parameter, Live Quotes.
-- Charter listet keine Detail-Backlogs → zentrale Quelle: `CONTEXT/09_ROADMAP_MVP.md`.
+- Implementiert: Trade Erfassung/Validierung, Basis-Kennzahlen (realized PnL, Win-Rate, Profit-Factor, realized Max Drawdown, realized Equity Curve, CAGR), einfache Walk-Forward-Simulation (Seed+Hash), Reproduzierbarkeit (Seed+Hash), Frontend-first Konsole (DevTools inkl. Queue), DecisionCard Felder.
+- Offene Punkte (Kurzreferenz, Details siehe Backlog): Unrealized Equity Curve Erweiterung, Erweiterte Pattern Analytics, Erweiterte Sim-Parameter, Retrieval Filter (ticker/as_of) & Snippet Qualität, Snapshot Regression Coverage Ausbau, Live Quotes Cache (optional), Queue Aggregatsmetriken & Retention.
+- Charter listet keine Detail-Backlogs → zentrale Quelle: `CONTEXT/09_ROADMAP_MVP.md` + `docs/DOCUMENTATION/tmp_backlogCollection.md`.
 
-Backlog Referenzen (Kurz): Kern offene Punkte IDs #1 #2 #3 #5 #6 #7 #8 #9 #10 — siehe tmp_backlogCollection.md
+Backlog Referenzen (Kurz): Siehe aktuelle IDs im Backlog (`tmp_backlogCollection.md`).
+Backlog: Testqueue Persistenz & Status-Klarheit (#P2-debt-testqueue) — siehe tmp_backlogCollection.md

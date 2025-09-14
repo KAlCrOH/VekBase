@@ -2,13 +2,13 @@
 
 Smoke:
 - trades.csv Roundtrip (implementiert)
-- analytics: realized PnL, realized MaxDD, Win-Rate, Holding-Dauer Durchschnitt (implementiert) — unrealized / CAGR / Patterns offen
+- analytics: realized PnL, realized MaxDD, Win-Rate, Holding-Dauer Durchschnitt, CAGR (implementiert) — unrealized Erweiterung / erweiterte Patterns offen
 - equity curve realized (implementiert)
 - sim: deterministischer Run + Persistenz Ordnerstruktur (implementiert)
 
 Regression:
 - Bei Änderungen an sim/analytics geplanter Snapshot-Vergleich (noch offen).
 
-Open Items (Quelle Roadmap, keine Duplizierung): Unrealized Equity Curve, Pattern Analytics, Snapshot Regression, DecisionCard UI Tests, Retrieval Filter Tests, CAGR.
+Open Items (Kurzreferenz – Details ausschließlich im Backlog): Unrealized Equity Curve, Erweiterte Pattern Analytics, Snapshot Regression Coverage Ausbau, DecisionCard/Retrieval UI Tests, Retrieval Filter Tests.
 
-Backlog: CAGR (#6), Unrealized Equity Curve (#7), Pattern Analytics (#8), Snapshot Regression Tests (#9) — siehe tmp_backlogCollection.md
+Backlog: Siehe `docs/DOCUMENTATION/tmp_backlogCollection.md` (IDs aktualisiert; erledigte Items wie CAGR entfernt).
