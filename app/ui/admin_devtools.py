@@ -23,9 +23,11 @@
 #
 # Tests
 #   tests/test_admin_devtools.py
+#   tests/test_test_center_facade.py  # Increment I1
 #
 # Do-Not-Change
 #   Banner policy-relevant
+#   Increment I1 (Test Center Facade): additive Helpers run_test_center/get_test_center_artifacts ohne Breaking Change
 # ============================================================
 """
 from __future__ import annotations
@@ -117,6 +119,9 @@ __all__ = [
     "run_snapshot",
     # queue api
     "submit_test_run","get_test_run","list_test_runs","process_test_queue","ensure_testqueue_workers","get_test_run_output","retry_test_run","get_queue_aggregates",
+    # test center facade
+    "run_test_center",
+    "get_test_center_artifacts",
 ]
 
 
@@ -154,3 +159,33 @@ def retry_test_run(run_id: str):
 def get_queue_aggregates(limit: int = 100):
     """Return simple aggregate metrics for recent finished runs (core.testqueue.aggregate_metrics)."""
     return _tq.aggregate_metrics(limit=limit)
+
+
+# --- Increment I1: Test Center Facade (artefaktorientiert) ---
+_LAST_TEST_CENTER: dict | None = None
+
+def run_test_center(k_expr: str | None = None, module_substr: str | None = None, nodeids: list[str] | None = None) -> dict:
+    """Führt Tests aus und erzeugt Artefakte (JUnit, Coverage, Summary) via core.devtools.run_tests_with_artifacts.
+    Rückgabe: { run_id, status, passed, failed, stdout_truncated, stderr_truncated, artifacts:{...} }
+    Truncation hält UI reaktionsfähig.
+    """
+    global _LAST_TEST_CENTER
+    result, arts = _dev.run_tests_with_artifacts(nodeids=nodeids, k_expr=k_expr, module_substr=module_substr)
+    summary = _dev.parse_summary(result.stdout)
+    def _trunc(txt: str, limit: int = 4000):
+        return txt if len(txt) <= limit else txt[:limit] + "\n...<truncated>"  # UI expand optional
+    payload = {
+        "run_id": arts['run_id'],
+        "status": result.status,
+        "passed": summary['passed'],
+        "failed": summary['failed'],
+        "stdout_truncated": _trunc(result.stdout),
+        "stderr_truncated": _trunc(result.stderr),
+        "artifacts": arts['paths'],
+    }
+    _LAST_TEST_CENTER = payload
+    return payload
+
+
+def get_test_center_artifacts() -> dict | None:
+    return _LAST_TEST_CENTER

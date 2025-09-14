@@ -34,6 +34,11 @@ from typing import List, Literal, Optional
 import subprocess, sys, re, os
 from pathlib import Path
 
+# Public export list (initialized early so later additive helpers can append)
+__all__: list[str] = [
+    'TestDiscoveryError', 'TestRunResult', 'discover_tests', 'run_tests', 'parse_summary'
+]
+
 
 class TestDiscoveryError(Exception):
     """Raised when discovery subprocess itself fails (nicht bei 0 Treffern)."""
@@ -127,3 +132,100 @@ def parse_summary(stdout: str) -> dict:
     passed = len([ln for ln in stdout.splitlines() if re.search(r"::(PASSED|SKIPPED)", ln)])
     failed = len([ln for ln in stdout.splitlines() if re.search(r"::(FAILED|ERROR)", ln)])
     return {"passed": passed, "failed": failed}
+
+
+# ============================================================
+# Additive Helpers (Increment I1 - Test Center) — artefaktbezogene Utilities
+# Contracts (additiv, kein Breaking Change):
+#   generate_run_id() -> str  (zeitbasierte eindeutige ID)
+#   artifact_dir(run_id) -> Path (stellt sicher, dass Basisverzeichnis existiert)
+#   run_tests_with_artifacts(k_expr|nodeids) -> (TestRunResult, dict(paths))
+#
+#   Artefakt-Layout:
+#     .artifacts/tests/<run_id>/summary.json
+#     .artifacts/tests/<run_id>/junit.xml
+#     .artifacts/tests/<run_id>/coverage.xml  (xml) / lcov.info optional
+#
+#   Policy: keine externen Dependencies; reine stdlib.
+#   Coverage/JUnit: via Pytest Plugins falls verfügbar; wir erzwingen Standardargumente --junitxml & --cov (wenn pytest-cov installiert; falls nicht, toleranter Fallback)
+#   Netzwerk: none
+# ============================================================
+import json as _json, time as _time, uuid as _uuid
+
+def generate_run_id() -> str:
+    # Kombiniert Zeitpräfix für Sortierbarkeit + kurze UUID
+    return f"{int(_time.time())}-{_uuid.uuid4().hex[:8]}"
+
+
+def artifact_dir(run_id: str) -> Path:
+    base = Path('.artifacts') / 'tests' / run_id
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _build_pytest_args_for_artifacts(run_id: str, nodeids: List[str] | None, k_expr: str | None, module_substr: str | None) -> List[str]:
+    args = [sys.executable, '-m', 'pytest', '-q']
+    # JUnit / Coverage: tolerant, auch wenn pytest-cov nicht installiert ist (Plugin ignoriert Parameter?)
+    junit_path = artifact_dir(run_id) / 'junit.xml'
+    coverage_path = artifact_dir(run_id) / 'coverage.xml'
+    # Add standard artifact args
+    args.extend(['--junitxml', str(junit_path)])
+    # Coverage: falls plugin nicht vorhanden führt es zu Fehler -> daher guarded: wir aktivieren nur wenn pytest-cov via import verfügbar
+    try:
+        import importlib
+        importlib.import_module('pytest_cov')  # noqa: F401
+        # Standard: Branch + XML
+        args.extend(['--cov=app', f'--cov-report=xml:{coverage_path}', '--cov-report=term'])
+    except Exception:
+        pass  # still run tests without coverage
+    if nodeids:
+        args.extend(nodeids)
+    else:
+        if k_expr:
+            args.extend(['-k', k_expr])
+        for mod_arg in _resolve_module_args(module_substr):
+            args.append(mod_arg)
+    return args
+
+
+def run_tests_with_artifacts(nodeids: List[str] | None = None, k_expr: str | None = None, module_substr: str | None = None, timeout: int = 180) -> tuple[TestRunResult, dict]:
+    """Run tests and persist junit/coverage + summary.json.
+    Rückgabewert: (TestRunResult, artifact_info_dict)
+    artifact_info_dict = { 'run_id': str, 'paths': { 'junit': str|None, 'coverage': str|None, 'summary': str } }
+    Fehlerfall: läuft Tests trotzdem (ohne Coverage) und erstellt summary.
+    """
+    run_id = generate_run_id()
+    args = _build_pytest_args_for_artifacts(run_id, nodeids=nodeids, k_expr=k_expr, module_substr=module_substr)
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+        rc = proc.returncode
+        status: Literal['passed','failed','error'] = 'passed' if rc == 0 else 'failed'
+        result = TestRunResult(status=status, returncode=rc, stdout=proc.stdout or '', stderr=proc.stderr or '')
+    except Exception as e:
+        result = TestRunResult(status='error', returncode=None, stdout='', stderr=str(e))
+    # Summary schreiben
+    summary = parse_summary(result.stdout)
+    art_dir = artifact_dir(run_id)
+    summary_path = art_dir / 'summary.json'
+    try:
+        with summary_path.open('w', encoding='utf-8') as f:
+            _json.dump({'run_id': run_id, 'status': result.status, 'passed': summary['passed'], 'failed': summary['failed']}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        # Ignorieren – UI kann ohne summary leben
+        pass
+    junit_path = art_dir / 'junit.xml'
+    cov_path = art_dir / 'coverage.xml'
+    artifacts = {
+        'run_id': run_id,
+        'paths': {
+            'junit': str(junit_path) if junit_path.exists() else None,
+            'coverage': str(cov_path) if cov_path.exists() else None,
+            'summary': str(summary_path) if summary_path.exists() else None,
+        }
+    }
+    return result, artifacts
+
+
+__all__ += [
+    'generate_run_id','artifact_dir','run_tests_with_artifacts'
+]

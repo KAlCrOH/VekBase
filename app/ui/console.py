@@ -405,12 +405,106 @@ with tabs[2]:
 from app.ui import devtools_shared as _dshared  # unified wrappers
 import os as _os
 
+# --- Increment I2: Metrics Snapshot Widget (OPTIMAL) ---
+try:
+    # Heuristik: earliest tab likely main dashboard (tabs[0])
+    with tabs[0]:  # type: ignore[name-defined]
+        import streamlit as st  # already imported above in file (safe re-import)
+        if 'metrics_snapshot_rendered' not in st.session_state:
+            st.session_state.metrics_snapshot_rendered = True
+            try:
+                from app.core.trade_repo import TradeRepository  # type: ignore
+                from app.analytics.metrics import aggregate_metrics  # type: ignore
+                # Repo / data acquisition reused from existing console context; fallback simple load
+                # We reuse or reconstruct a repo if variable not globally available
+                repo_obj = None
+                if 'repo' in globals():  # existing pattern in file
+                    repo_obj = globals().get('repo')
+                if repo_obj is None:
+                    # minimal fallback (empty repo) – metrics widget handles empty
+                    from app.core.trade_model import Trade  # type: ignore
+                    repo_obj = TradeRepository()
+                trades = getattr(repo_obj, 'all', lambda: [])()
+                metrics = aggregate_metrics(trades) if trades else None
+                st.markdown('### Metrics Snapshot')
+                if not metrics:
+                    st.caption('(no data)')
+                else:
+                    # Select subset & thresholds
+                    subset_keys = ['total_realized_pnl','win_rate','max_drawdown_realized','avg_holding_duration_sec','trades_total']
+                    thresholds = {
+                        'win_rate': [(0.5,'red'), (0.6,'amber'), (0.7,'green')],
+                        'total_realized_pnl': [(-1,'red'), (0,'amber'), (1,'green')],
+                        'max_drawdown_realized': [( -1000000,'green'), (-100,'amber'), (-100000000,'red')],  # placeholder ordering by magnitude
+                        'avg_holding_duration_sec': [(0,'green'), (3600*24,'amber'), (3600*24*7,'red')],
+                        'trades_total': [(0,'red'), (5,'amber'), (10,'green')],
+                    }
+                    cols = st.columns(len(subset_keys))
+                    for i,key in enumerate(subset_keys):
+                        val = metrics.get(key,0)
+                        color = 'grey'
+                        if key in thresholds:
+                            # Interpret thresholds ascending; pick first matching color by rule logic adaptation
+                            tdefs = thresholds[key]
+                            if key == 'win_rate':
+                                color = 'red' if val < 0.5 else 'amber' if val < 0.7 else 'green'
+                            elif key == 'total_realized_pnl':
+                                color = 'red' if val < 0 else 'amber' if val < 100 else 'green'
+                            elif key == 'max_drawdown_realized':
+                                color = 'green' if val > -50 else 'amber' if val > -200 else 'red'
+                            elif key == 'avg_holding_duration_sec':
+                                color = 'green' if val < 3600*24 else 'amber' if val < 3600*24*7 else 'red'
+                            elif key == 'trades_total':
+                                color = 'red' if val < 1 else 'amber' if val < 10 else 'green'
+                        with cols[i]:
+                            st.markdown(f"<div style='text-align:center'><span style='font-size:0.8em'>{key}</span><br><span style='font-weight:bold;color:{color}'>"+ (f"{val:.2f}" if isinstance(val,float) else str(val)) + "</span></div>", unsafe_allow_html=True)
+            except Exception as _e:
+                st.caption(f"Metrics Snapshot unavailable: {_e}")
+except Exception:
+    # Silent fallback (do not break console if tabs structure differs)
+    pass
+
 # DevTools Tab (refactored to use app.core.devtools)
 with tabs[3]:
     st.subheader("DevTools — Test Runner")
     if not devtools_enabled:
         st.info("DevTools deaktiviert (VEK_DEVTOOLS=0). Setze Env Var um zu aktivieren.")
     else:
+        # --- Increment I1: Optional neues 'Test Center' Panel (Artefakte, Status, Logs) ---
+        test_center_flag = bool(int(_os.environ.get("TEST_CENTER_FLAG", "1")))
+        if test_center_flag:
+            with st.expander("Test Center (Artifacts)", expanded=False):
+                from app.ui import admin_devtools as _adm_dt
+                if "tc_state" not in st.session_state:
+                    st.session_state.tc_state = {"filter":"","module":"","last":None, "auto":False, "show_artifacts":True}
+                tcs = st.session_state.tc_state
+                ctc1, ctc2, ctc3, ctc4 = st.columns([3,2,1,1])
+                with ctc1:
+                    tcs["filter"] = st.text_input("-k Filter", tcs["filter"], key="tc_filter")
+                with ctc2:
+                    tcs["module"] = st.text_input("Module Substr", tcs["module"], key="tc_module")
+                with ctc3:
+                    if st.button("Run", key="tc_run_btn"):
+                        with st.spinner("Running (artifacts)..."):
+                            tcs["last"] = _adm_dt.run_test_center(k_expr=tcs["filter"].strip() or None, module_substr=tcs["module"].strip() or None)
+                with ctc4:
+                    if tcs.get("last"):
+                        badge_color = {"passed":"green","failed":"red","error":"red"}.get(tcs["last"]["status"],"grey")
+                        st.markdown(f"Status:<br><span style='color:{badge_color};font-weight:bold'>{tcs['last']['status']}</span>", unsafe_allow_html=True)
+                if tcs.get("last"):
+                    last = tcs["last"]
+                    st.markdown(f"✅ {last['passed']} / ❌ {last['failed']}")
+                    with st.expander("Stdout", expanded=False):
+                        st.code(last.get("stdout_truncated") or "(empty)")
+                    if last.get("stderr_truncated"):
+                        with st.expander("Stderr", expanded=False):
+                            st.code(last["stderr_truncated"], language="text")
+                    arts = last.get("artifacts") or {}
+                    if any(arts.values()):
+                        st.caption("Artifacts:")
+                        for k,v in arts.items():
+                            if v:
+                                st.code(f"{k}: {v}")
         if "dt_state" not in st.session_state:
             st.session_state.dt_state = {
                 "status": "idle",  # idle|running|passed|failed|error

@@ -47,3 +47,20 @@ Thumbs.db
 __pypackages__/
 *.bak
 *.swp
+
+# Artifacts (Test Center / Runs / Coverage exports) - Increment I1/I2
+.artifacts/
+*.out
+data/devtools/testqueue_runs.jsonl
+data/devtools/testqueue_outputs/
+data/devtools/*.jsonl
+data/devtools/*.out
+
+# Allow committed baseline decision cards & default data JSON
+!data/decision_cards.json
+
+# Streamlit cache (if used)
+streamlit_cache/
+
+# Local coverage XML/LCOV produced via optional pytest-cov (already partially covered above)
+lcov.info
