@@ -122,6 +122,8 @@ __all__ = [
     # test center facade
     "run_test_center",
     "get_test_center_artifacts",
+    "list_test_center_runs",
+    "get_test_center_run",
 ]
 
 
@@ -163,6 +165,9 @@ def get_queue_aggregates(limit: int = 100):
 
 # --- Increment I1: Test Center Facade (artefaktorientiert) ---
 _LAST_TEST_CENTER: dict | None = None
+# Ringpuffer für Historie der letzten Läufe (nur im Speicher, keine Persistenz) – max 20 Einträge
+from collections import deque as _deque
+_TEST_CENTER_HISTORY = _deque(maxlen=20)
 
 def run_test_center(k_expr: str | None = None, module_substr: str | None = None, nodeids: list[str] | None = None) -> dict:
     """Führt Tests aus und erzeugt Artefakte (JUnit, Coverage, Summary) via core.devtools.run_tests_with_artifacts.
@@ -184,8 +189,26 @@ def run_test_center(k_expr: str | None = None, module_substr: str | None = None,
         "artifacts": arts['paths'],
     }
     _LAST_TEST_CENTER = payload
+    # In Historie aufnehmen (neuste vorne für ergonomische Anzeige beim Reverse in list())
+    _TEST_CENTER_HISTORY.append(payload)
     return payload
 
 
 def get_test_center_artifacts() -> dict | None:
     return _LAST_TEST_CENTER
+
+
+def list_test_center_runs(limit: int = 10) -> list[dict]:
+    """Gibt bis zu `limit` letzte Test Center Runs (neueste zuerst) zurück.
+    Nur In-Memory (kein Disk State)."""
+    items = list(_TEST_CENTER_HISTORY)[-limit:]
+    return list(reversed(items))
+
+
+def get_test_center_run(run_id: str) -> dict:
+    """Lookup eines Laufes aus der In-Memory Historie.
+    Raises ValueError bei unbekannter ID (Negativtest sichert Verhalten)."""
+    for item in _TEST_CENTER_HISTORY:
+        if item.get("run_id") == run_id:
+            return item
+    raise ValueError(f"Unknown test center run_id: {run_id}")

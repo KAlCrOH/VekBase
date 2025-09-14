@@ -280,6 +280,42 @@ with tabs[1]:
                 except Exception as e:
                     st.warning(f"Altair chart fallback (reason: {e})")
                     st.line_chart(full.set_index("ts"))
+                # Regime Overlay & Summary (Flag VEK_REGIME)
+                if bool(int(os.environ.get("VEK_REGIME", "0"))):
+                    try:
+                        from app.ui.regime_ui import summarize_regimes, compute_overlay_segments
+                        prices_series = list(full.sort_values("ts")["equity_realized"].dropna()) if "equity_realized" in full.columns else []
+                        reg_payload = summarize_regimes(repo.all(), prices_series)
+                        labels = reg_payload.get("labels") or []
+                        if labels:
+                            segs = compute_overlay_segments(labels)
+                            if segs:
+                                import pandas as pd
+                                eq_only = full.sort_values("ts")[["ts","equity_realized"]].dropna()
+                                def _idx_ts(i:int):
+                                    return eq_only.iloc[min(i, len(eq_only)-1)]["ts"] if len(eq_only) else None
+                                rows = [{
+                                    "start_ts": _idx_ts(s['start_idx']),
+                                    "end_ts": _idx_ts(s['end_idx']),
+                                    "vol_bucket": s['vol_bucket'],
+                                    "trend_bucket": s['trend_bucket'],
+                                } for s in segs]
+                                df_seg = pd.DataFrame(rows)
+                                st.caption("Regime Segments (compressed)")
+                                st.dataframe(df_seg.head(40))
+                            summ = reg_payload.get("summary", {})
+                            if summ.get("regimes"):
+                                try:
+                                    import pandas as pd
+                                    df_reg = pd.DataFrame(summ['regimes'])
+                                    st.caption("Regime Return Summary")
+                                    st.dataframe(df_reg)
+                                except Exception:
+                                    st.json(summ)
+                        else:
+                            st.info("Nicht genug Daten für Regime (Flag aktiv)")
+                    except Exception as e:
+                        st.warning(f"Regime Overlay Fehler: {e}")
             else:
                 st.info("No equity data to plot.")
         # Pattern Analytics (Histogram + Scatter) behind feature flag
@@ -356,6 +392,29 @@ with tabs[1]:
                         st.bar_chart(dfb)
                 else:
                     st.info("No realized returns yet for distribution.")
+        # --- Increment I2: Research Preview Panels (Attribution & Portfolio) ---
+        try:
+            from app.ui.research_preview import panels_enabled as _rp_enabled, attribution_preview as _attr_prev, portfolio_preview as _port_prev
+            if _rp_enabled():
+                st.markdown("---")
+                st.subheader("Research Preview")
+                eq_curve = realized_equity_curve(repo.all())
+                # Attribution Panel (Flag VEK_ATTRIBUTION)
+                if bool(int(os.environ.get("VEK_ATTRIBUTION","1"))):
+                    with st.expander("Factor Attribution (Preview)", expanded=False):
+                        payload = _attr_prev(eq_curve)
+                        st.json({k:v for k,v in payload.items() if k != 'artifact_path'})
+                        if payload.get('artifact_path'):
+                            st.caption(f"Artifact: {payload['artifact_path']}")
+                # Portfolio Panel (Flag VEK_PORTFOLIO)
+                if bool(int(os.environ.get("VEK_PORTFOLIO","1"))):
+                    with st.expander("Portfolio Optimizer (Preview)", expanded=False):
+                        payload = _port_prev(eq_curve)
+                        st.json({k:v for k,v in payload.items() if k != 'artifact_path'})
+                        if payload.get('artifact_path'):
+                            st.caption(f"Artifact: {payload['artifact_path']}")
+        except Exception as _e_rp:
+            st.caption(f"Research preview unavailable: {_e_rp}")
     else:
         st.info("Keine Trades geladen.")
 
@@ -476,9 +535,9 @@ with tabs[3]:
             with st.expander("Test Center (Artifacts)", expanded=False):
                 from app.ui import admin_devtools as _adm_dt
                 if "tc_state" not in st.session_state:
-                    st.session_state.tc_state = {"filter":"","module":"","last":None, "auto":False, "show_artifacts":True}
+                    st.session_state.tc_state = {"filter":"","module":"","last":None, "selected_run":None}
                 tcs = st.session_state.tc_state
-                ctc1, ctc2, ctc3, ctc4 = st.columns([3,2,1,1])
+                ctc1, ctc2, ctc3, ctc4, ctc5 = st.columns([3,2,1,1,1])
                 with ctc1:
                     tcs["filter"] = st.text_input("-k Filter", tcs["filter"], key="tc_filter")
                 with ctc2:
@@ -488,23 +547,46 @@ with tabs[3]:
                         with st.spinner("Running (artifacts)..."):
                             tcs["last"] = _adm_dt.run_test_center(k_expr=tcs["filter"].strip() or None, module_substr=tcs["module"].strip() or None)
                 with ctc4:
+                    if st.button("Refresh", key="tc_refresh_btn"):
+                        pass  # no-op triggers rerender to update history
+                with ctc5:
                     if tcs.get("last"):
                         badge_color = {"passed":"green","failed":"red","error":"red"}.get(tcs["last"]["status"],"grey")
                         st.markdown(f"Status:<br><span style='color:{badge_color};font-weight:bold'>{tcs['last']['status']}</span>", unsafe_allow_html=True)
-                if tcs.get("last"):
-                    last = tcs["last"]
-                    st.markdown(f"✅ {last['passed']} / ❌ {last['failed']}")
+                # Detail view (selected or last)
+                detail = tcs.get("selected_run") or tcs.get("last")
+                if detail:
+                    st.markdown(f"Run: {detail['run_id']} – ✅ {detail['passed']} / ❌ {detail['failed']}")
                     with st.expander("Stdout", expanded=False):
-                        st.code(last.get("stdout_truncated") or "(empty)")
-                    if last.get("stderr_truncated"):
+                        st.code(detail.get("stdout_truncated") or "(empty)")
+                    if detail.get("stderr_truncated"):
                         with st.expander("Stderr", expanded=False):
-                            st.code(last["stderr_truncated"], language="text")
-                    arts = last.get("artifacts") or {}
+                            st.code(detail["stderr_truncated"], language="text")
+                    arts = detail.get("artifacts") or {}
                     if any(arts.values()):
-                        st.caption("Artifacts:")
+                        import os as _os2
+                        st.caption("Artifacts (click path to copy):")
                         for k,v in arts.items():
-                            if v:
+                            if v and _os2.path.exists(v):
                                 st.code(f"{k}: {v}")
+                # History Table
+                runs = _adm_dt.list_test_center_runs(limit=10)
+                if runs:
+                    import pandas as _pd
+                    df_hist = _pd.DataFrame([
+                        {"run_id": r['run_id'], "status": r['status'], "passed": r['passed'], "failed": r['failed'], "junit": bool(r.get('artifacts',{}).get('junit')), "coverage": bool(r.get('artifacts',{}).get('coverage'))}
+                        for r in runs
+                    ])
+                    st.markdown("#### Recent Runs")
+                    st.dataframe(df_hist)
+                    pick = st.selectbox("Select Run", ["(latest)"] + list(df_hist["run_id"].values), index=0)
+                    if pick != "(latest)":
+                        try:
+                            tcs["selected_run"] = _adm_dt.get_test_center_run(pick)
+                        except Exception as _e_pick:
+                            st.warning(f"Lookup failed: {_e_pick}")
+                    else:
+                        tcs["selected_run"] = None
         if "dt_state" not in st.session_state:
             st.session_state.dt_state = {
                 "status": "idle",  # idle|running|passed|failed|error
@@ -831,6 +913,67 @@ with tabs[3]:
                         )
         if qs.get("last_id"):
             st.caption(f"Letzte Run ID: {qs['last_id']} | Status: {_adm_dt.get_test_run(qs['last_id'])['status'] if _adm_dt.get_test_run(qs['last_id']) else 'n/a'}")
+
+        # Strategy Batch Panel (Flag-gated: VEK_STRAT_SWEEP)
+        if bool(int(_os.environ.get("VEK_STRAT_SWEEP", "0"))):
+            st.markdown("---")
+            with st.expander("Strategy Batch (Robustness)", expanded=False):
+                st.caption("Analyse Robustheit via Param Grid & Seeds — Flag VEK_STRAT_SWEEP=1 aktiv.")
+                from app.ui.strategy_batch_ui import run_strategy_batch_ui as _sb_ui
+                if "strat_batch_state" not in st.session_state:
+                    st.session_state.strat_batch_state = {
+                        "strategies": '["ma_crossover","random_flip"]',
+                        "param_grid": '{"ma_short":[5,7],"ma_long":[15,20],"flip_prob":[0.05,0.1]}',
+                        "seeds": '1,2',
+                        "running": False,
+                        "last": None,
+                        "show_results": True,
+                    }
+                sb = st.session_state.strat_batch_state
+                c1, c2 = st.columns([3,2])
+                with c1:
+                    sb["strategies"] = st.text_area("Strategies JSON", value=sb["strategies"], height=60,
+                        help='List of strategy names (registry: ma_crossover, random_flip)')
+                with c2:
+                    sb["seeds"] = st.text_input("Seeds (CSV)", value=sb["seeds"], help="Comma separated integers")
+                sb["param_grid"] = st.text_area("Param Grid JSON", value=sb["param_grid"], height=80,
+                    help='JSON object mapping param->list. Irrelevant params ignored by strategies.')
+                run_clicked = st.button("Run Strategy Batch", disabled=sb["running"], key="sb_run_btn")
+                if run_clicked:
+                    sb["running"] = True
+                    with st.spinner("Running batch..."):
+                        res = _sb_ui(sb["strategies"], sb["param_grid"], sb["seeds"], price_series=None)
+                    sb["last"] = res
+                    sb["running"] = False
+                if sb.get("last"):
+                    last = sb["last"]
+                    if last.get("error"):
+                        st.error(last["error"])
+                    else:
+                        summary = last.get("summary", {})
+                        st.markdown("**Summary**")
+                        st.json(summary)
+                        if sb.get("show_results"):
+                            rs = last.get("results") or []
+                            if rs:
+                                try:
+                                    import pandas as _pd
+                                    df = _pd.DataFrame([
+                                        {
+                                            "strategy": r["strategy"],
+                                            "param_hash": r["param_hash"],
+                                            "seed": r["seed"],
+                                            "cagr": r["metrics"]["cagr"],
+                                            "max_dd": r["metrics"]["max_drawdown_realized"],
+                                        } for r in rs
+                                    ])
+                                    st.dataframe(df)
+                                except Exception:
+                                    st.caption("(results table unavailable)")
+                        with st.expander("Raw Results JSON", expanded=False):
+                            st.json(last)
+        else:
+            st.caption("Strategy Batch Panel deaktiviert (VEK_STRAT_SWEEP=0).")
 
 with tabs[4]:
     st.subheader("Retrieval (Context Keyword)")
