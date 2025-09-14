@@ -27,7 +27,7 @@
 # ============================================================
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import List, Tuple, Callable, Dict, Any
+from typing import List, Tuple, Callable, Dict, Any, Optional
 import hashlib
 import random
 from datetime import datetime, UTC
@@ -42,15 +42,46 @@ class SimResult:
     meta: Dict[str, Any]
     folder: Path | None = field(default=None)  # optional Persistenzpfad (nur gesetzt von run_and_persist)
 
-def run_sim(prices: List[Tuple[datetime, float]], rule: Callable[[List[Tuple[datetime, float]]], str], seed: int, initial_cash: float = 10_000.0, trade_size: float = 0.1) -> SimResult:
-    """Run simple simulation.
-    rule: function that given past price history returns one of: 'BUY','SELL','HOLD'
-    trade_size: fraction of current cash to deploy when buying.
-    Determinism via explicit seed.
+def run_sim(
+    prices: List[Tuple[datetime, float]],
+    rule: Callable[[List[Tuple[datetime, float]]], str],
+    seed: int,
+    initial_cash: float = 10_000.0,
+    trade_size: float = 0.1,
+    take_profit_pct: Optional[float] = None,
+    stop_loss_pct: Optional[float] = None,
+    fee_rate_pct: float = 0.0,
+) -> SimResult:
+    """Run simple simulation with optional TP/SL and fee model.
+
+    Parameters
+    ----------
+    prices : list[(datetime, float)]
+        Time ordered price series.
+    rule : callable(history)->str
+        Returns one of 'BUY','SELL','HOLD'. Only past history (inclusive) supplied.
+    seed : int
+        Random seed (reserved for future stochastic extensions; ensures hash stability).
+    initial_cash : float, default 10_000.0
+    trade_size : float, default 0.1
+        Fraction of *current available cash* allocated on each BUY signal.
+    take_profit_pct : float | None
+        If set and unrealized return >= this percent (e.g. 0.05 = +5%), position is force-closed at current price.
+    stop_loss_pct : float | None
+        If set and unrealized return <= -this percent, position is force-closed at current price.
+    fee_rate_pct : float, default 0.0
+        Proportional fee applied on notional for each BUY and SELL (e.g. 0.001 = 0.1%).
+
+    Notes
+    -----
+    - Backward compatible: leaving TP/SL None & fee 0 reproduces legacy behavior.
+    - Hash incorporates new parameters to preserve determinism guarantees.
+    - Cost basis tracked for average entry to compute unrealized PnL.
     """
     rnd = random.Random(seed)
     cash = initial_cash
     shares = 0.0
+    cost_basis = 0.0  # total cost invested in current open position (excluding fees on sell)
     curve: List[Tuple[datetime, float]] = []
     for i in range(len(prices)):
         history = prices[: i + 1]
@@ -58,17 +89,34 @@ def run_sim(prices: List[Tuple[datetime, float]], rule: Callable[[List[Tuple[dat
         decision = rule(history)
         if decision == 'BUY' and cash > 0:
             alloc = cash * trade_size
-            buy_shares = alloc / price if price > 0 else 0
-            shares += buy_shares
-            cash -= alloc
+            if alloc > 0 and price > 0:
+                fee_buy = alloc * fee_rate_pct if fee_rate_pct > 0 else 0.0
+                buy_shares = alloc / price
+                shares += buy_shares
+                cost_basis += alloc  # track capital deployed (without fee)
+                cash -= (alloc + fee_buy)
         elif decision == 'SELL' and shares > 0:
-            # sell all
-            cash += shares * price
+            proceeds = shares * price
+            fee_sell = proceeds * fee_rate_pct if fee_rate_pct > 0 else 0.0
+            cash += proceeds - fee_sell
             shares = 0.0
+            cost_basis = 0.0
+
+        # Threshold-based forced exits (override rule) AFTER applying rule decision.
+        if shares > 0 and cost_basis > 0:
+            unrealized_ret = (shares * price - cost_basis) / cost_basis if cost_basis > 0 else 0.0
+            tp_hit = take_profit_pct is not None and unrealized_ret >= take_profit_pct
+            sl_hit = stop_loss_pct is not None and unrealized_ret <= -stop_loss_pct
+            if tp_hit or sl_hit:
+                proceeds = shares * price
+                fee_sell = proceeds * fee_rate_pct if fee_rate_pct > 0 else 0.0
+                cash += proceeds - fee_sell
+                shares = 0.0
+                cost_basis = 0.0
         # HOLD does nothing
         equity = cash + shares * price
         curve.append((ts, equity))
-    hash_input = f"{seed}|{initial_cash}|{trade_size}|{len(prices)}".encode()
+    hash_input = f"{seed}|{initial_cash}|{trade_size}|{len(prices)}|{take_profit_pct}|{stop_loss_pct}|{fee_rate_pct}".encode()
     sim_hash = hashlib.sha256(hash_input).hexdigest()[:12]
     return SimResult(equity_curve=curve, final_cash=equity, meta={"seed": seed, "hash": sim_hash})
 

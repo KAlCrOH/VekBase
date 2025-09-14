@@ -37,7 +37,7 @@ from app.core import snapshots as _snap
 from app.core import testqueue as _tq  # queued test runner (parallel/persistent)
 
 
-def run_test_subset(k_expr: Optional[str] = None, max_tests: int = 10) -> Dict[str, Any]:
+def run_test_subset(k_expr: Optional[str] = None, max_tests: int = 5) -> Dict[str, Any]:
     """Run (optionally filtered) tests with a soft cap to keep runtime low in Admin UI.
     Strategy:
       1. If k_expr provided -> discover nodeids via devtools.discover_tests(k_expr)
@@ -52,18 +52,30 @@ def run_test_subset(k_expr: Optional[str] = None, max_tests: int = 10) -> Dict[s
         try:
             discovered = _dev.discover_tests(k_expr=k_expr, module_substr=None)
             if discovered:
-                nodeids = discovered[:max_tests]
-        except Exception as e:  # discovery failed
-            return {"status": "error", "passed": 0, "failed": 0, "stdout": "", "stderr": f"discovery error: {e}"}
+                # Filter out potentially recursive or heavy tests (admin_devtools itself & queue extended) to keep fast
+                filtered = [n for n in discovered if 'test_admin_devtools.py::test_admin_devtools_run_subset_metrics' not in n and 'queue_metrics_ext' not in n]
+                if not filtered:
+                    filtered = discovered
+                nodeids = filtered[:max_tests]
+        except Exception as e:  # discovery failed -> graceful fallback to direct -k run
+            nodeids = None  # ensure fallback path
+            fallback_note = f"discovery error: {e}"
+        else:
+            fallback_note = ""
     # Run tests (either subset nodeids or fallback full expression)
-    res = _dev.run_tests(nodeids=nodeids, k_expr=None if nodeids else (k_expr or None), module_substr=None, timeout=300)
+    # Use a shorter timeout for UI subset runs to keep responsiveness high
+    res = _dev.run_tests(nodeids=nodeids, k_expr=None if nodeids else (k_expr or None), module_substr=None, timeout=120)
     summary = _dev.parse_summary(res.stdout)
+    stderr_combined = res.stderr
+    # Append discovery fallback note if present
+    if 'fallback_note' in locals() and fallback_note and res.stderr.find(fallback_note) == -1:
+        stderr_combined = (stderr_combined + ("\n" if stderr_combined else "") + fallback_note)
     return {
         "status": res.status,
         "passed": summary["passed"],
         "failed": summary["failed"],
         "stdout": res.stdout,
-        "stderr": res.stderr,
+        "stderr": stderr_combined,
     }
 
 

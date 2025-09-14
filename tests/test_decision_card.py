@@ -56,3 +56,32 @@ def test_decision_card_invalid_action_type():
         assert False, "Expected ValueError for invalid action type"
     except ValueError:
         pass
+
+
+def test_decision_card_action_requires_target_for_add():
+    try:
+        make_decision_card("dc5", author="a", title="T", action={"type": "add"})
+        assert False, "Expected ValueError for missing target_w on add"
+    except ValueError as e:
+        assert "target_w" in str(e)
+
+
+def test_decision_card_action_exit_disallows_nonzero_target():
+    try:
+        make_decision_card("dc6", author="a", title="T", action={"type": "exit", "target_w": 0.1})
+        assert False, "Expected ValueError for non-zero target_w on exit"
+    except ValueError as e:
+        assert "exit" in str(e)
+
+
+def test_decision_card_action_ttl_days_minimum():
+    try:
+        make_decision_card("dc7", author="a", title="T", action={"type": "hold", "ttl_days": 0})
+        assert False, "Expected ValueError for ttl_days=0"
+    except ValueError as e:
+        assert "ttl_days" in str(e)
+
+
+def test_decision_card_action_hold_without_target_ok():
+    card = make_decision_card("dc8", author="a", title="T", action={"type": "hold"})
+    assert card.action is not None and card.action.target_w is None

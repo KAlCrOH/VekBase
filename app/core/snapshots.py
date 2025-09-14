@@ -42,6 +42,8 @@ from ..analytics.metrics import (
     unrealized_equity_timeline,
     unrealized_equity_timeline_by_ticker,
 )
+from ..sim.simple_walk import run_sim, momentum_rule
+from datetime import datetime, timedelta
 
 SCHEMA_VERSION = 1
 
@@ -73,6 +75,24 @@ def create_snapshot(target: str) -> Dict[str, Any]:
     elif target == "equity_curve_per_ticker":
         per = unrealized_equity_timeline_by_ticker(repo.all(), mark_prices=mark_prices)
         data = {ticker: [[ts.isoformat(), v] for ts, v in series] for ticker, series in per.items()}
+    elif target == "sim_equity_curve":
+        # deterministic synthetic price path
+        prices = []
+        start = datetime(2024,1,1)
+        for i in range(8):
+            prices.append((start + timedelta(days=i), 100 + i * 2))  # linear ascent
+        sim_res = run_sim(prices, momentum_rule(2), seed=99, initial_cash=1000, trade_size=0.5)
+        data = {"points": [[ts.isoformat(), v] for ts, v in sim_res.equity_curve], "final_cash": sim_res.final_cash, "hash": sim_res.meta['hash']}
+    elif target == "benchmark_overlay_sample":
+        # Provide minimal structure used by UI overlay (equity + benchmark synthetic)
+        eq_prices = []
+        bench_prices = []
+        start = datetime(2024,1,1)
+        for i in range(6):
+            ts = start + timedelta(days=i)
+            eq_prices.append([ts.isoformat(), 100 + i * 3])
+            bench_prices.append([ts.isoformat(), 100 + i * 2])
+        data = {"equity_curve": eq_prices, "benchmark_curve": bench_prices}
     else:
         raise ValueError(f"Unknown snapshot target: {target}")
     return {"target": target, "data": data, "schema_version": SCHEMA_VERSION}

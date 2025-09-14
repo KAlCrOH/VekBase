@@ -27,6 +27,7 @@
 # ============================================================
 from __future__ import annotations
 from typing import List, Dict, Tuple
+import os
 from datetime import datetime, UTC
 from dataclasses import dataclass
 from ..core.trade_model import Trade
@@ -184,6 +185,61 @@ def aggregate_metrics(trades: List[Trade], mark_prices: Dict[str, float] | None 
         "open_position_shares": open_positions,
         "timestamp_now": now_ts.isoformat(),
     }
+    # --- Optional Risk Metrics (feature-flagged) ---
+    if os.getenv("VEK_RISK_METRICS") == "1" and sells:
+        # Trade returns based only on sells with positive cost basis
+        trade_returns: List[float] = []
+        for p in sells:
+            if p.cost_basis > 0:
+                trade_returns.append(p.realized_pnl / p.cost_basis)
+        if trade_returns:
+            sorted_rets = sorted(trade_returns)
+            def _q(vals: List[float], q: float) -> float:
+                if not vals:
+                    return 0.0
+                if q <= 0:
+                    return vals[0]
+                if q >= 1:
+                    return vals[-1]
+                pos = (len(vals) - 1) * q
+                lo = int(pos)
+                hi = min(lo + 1, len(vals) - 1)
+                frac = pos - lo
+                return vals[lo] * (1 - frac) + vals[hi] * frac
+            # Historical VaR (positive number representing magnitude of potential loss)
+            var_95 = -_q(sorted_rets, 0.05)
+            var_99 = -_q(sorted_rets, 0.01)
+            # Expected Shortfall (Conditional VaR): mean of returns <= quantile (report positive magnitude like VaR)
+            def _expected_shortfall(vals: List[float], alpha: float) -> float:
+                if not vals:
+                    return 0.0
+                cut = _q(vals, alpha)
+                tail = [v for v in vals if v <= cut]
+                if not tail:
+                    return 0.0
+                es = -sum(tail)/len(tail)
+                return max(es, 0.0)
+            es_95 = _expected_shortfall(sorted_rets, 0.05)
+            es_99 = _expected_shortfall(sorted_rets, 0.01)
+            worst_ret = sorted_rets[0]
+            worst_pnl = min(p.realized_pnl for p in sells)
+            # Rolling VaR(95) over window=20 (if enough observations) using same historical method
+            rolling_var_95: List[float] = []
+            if len(sorted_rets) >= 5:  # minimal for small windows
+                window = 20
+                for i in range(1, len(sorted_rets)+1):
+                    window_slice = sorted_rets[max(0, i-window):i]
+                    rolling_var_95.append(max(-_q(sorted(window_slice), 0.05), 0.0))
+            result.update({
+                "var_95": max(var_95, 0.0),
+                "var_99": max(var_99, 0.0),
+                "es_95": es_95,
+                "es_99": es_99,
+                "max_adverse_trade_return": worst_ret,  # typically negative or 0
+                "max_adverse_trade_pnl": worst_pnl,
+                "returns_sample_size": len(sorted_rets),
+                "rolling_var95_series": rolling_var_95,  # list for potential charting
+            })
     # CAGR nur wenn ausreichend realisierte Kurve existiert
     realized_curve = realized_equity_curve(trades)
     # Standardfall: >=2 Punkte -> klassischer CAGR über Equity Kurve (realized PnL kumulativ)

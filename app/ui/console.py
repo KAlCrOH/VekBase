@@ -268,12 +268,14 @@ with tabs[1]:
                     plot_df = full.melt(id_vars="ts", value_vars=melt_cols, var_name="series", value_name="value")
                     # Drop NaNs
                     plot_df = plot_df.dropna(subset=["value"])  # type: ignore
+                    from .console_theme import apply_console_theme
                     base_chart = alt.Chart(plot_df).mark_line(point=False).encode(
                         x=alt.X("ts:T", title="Timestamp"),
                         y=alt.Y("value:Q", title="Value"),
                         color=alt.Color("series:N", legend=alt.Legend(title="Series")),
                         tooltip=["ts:T","series:N","value:Q"],
                     ).properties(height=400)
+                    base_chart = apply_console_theme(base_chart)
                     st.altair_chart(base_chart, use_container_width=True)
                 except Exception as e:
                     st.warning(f"Altair chart fallback (reason: {e})")

@@ -1,5 +1,6 @@
-# DecisionCard Spec (JSON)
+# DecisionCard Spec (JSON + Workflow)
 
+Minimaler Kern (Inhalt):
 {
   "ticker": "NVDA",
   "as_of": "YYYY-MM-DD",
@@ -10,6 +11,32 @@
   "risks": ["Rate shock", "Supply constraints"],
   "confidence": 0.0-1.0
 }
-  Status: AKTUALISIERT – Dataclass (`core/decision_card.py`) enthält Felder `action{type,target_w,ttl_days}`, `risks`, `confidence` (Validierung: type ∈ hold|add|trim|exit; confidence ∈ [0,1]).
 
-Hinweis: Feld-Divergenz Item erledigt; keine offenen Schema-Deltas. Offene Analytics/Pattern Themen siehe Backlog.
+Erweiterung (Workflow Felder – implementiert):
+{
+  "status": "draft|proposed|approved|rejected",
+  "reviewers": ["analystA", "leadB"],
+  "approved_at": "2025-09-14T12:00:00Z | null",
+  "expires_at": "2025-12-14T12:00:00Z | null"  // gesetzt bei approval + action.ttl_days
+}
+
+Validierungsregeln (implementiert in `ActionSpec.validate` + Fabrikfunktion):
+| Feld | Regel |
+|------|-------|
+| action.type | ∈ {hold, add, trim, exit} |
+| action.target_w | Pflicht für add/trim; verboten ≠0 bei exit; ≥0 wenn vorhanden |
+| action.ttl_days | ≥1 wenn vorhanden |
+| confidence | float ∈ [0,1] |
+| status | initial 'draft'; nur Übergänge draft→proposed→approved|rejected |
+| reviewers | Liste Strings; Reviewer beim Transition hinzugefügt |
+| expires_at | approved_at + ttl_days (falls action.ttl_days gesetzt) |
+
+Workflow API:
+`transition_status(card, new_status, reviewer=None, now=None)` → Mutiert Karte mit obigen Constraints.
+
+Audit Trail (Geplant):
+- Nächster Schritt: Historisierung jeder Transition (timestamp, from→to, reviewer) für Revisionssicherheit.
+
+Status: SPEZIFIKATION AKTUALISIERT – alle dargestellten Felder implementiert, Audit Trail offen.
+
+Siehe Roadmap für Governance-Erweiterungen & DecisionCard Dashboard Plan.

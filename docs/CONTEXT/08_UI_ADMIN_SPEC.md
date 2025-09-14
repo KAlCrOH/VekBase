@@ -1,19 +1,30 @@
-# UI Console Spec (Frontend-First Streamlit)
+# UI Console Spec (Frontend-First Streamlit) – Aktualisiert
 
 Unified Konsole: `app/ui/console.py` (Tabs: Trades, Analytics, Simulation, DevTools).
 
 Sections (Soll / Ist):
 1) Trades: Tabelle (IST), Formular (IST), Import-Validierung (IST), Speichern/Export (IST)
-2) Analytics: REALIZED PnL, Win-Rate, Profit-Factor, realized MaxDD, Holding-Dauer avg, realized Equity Curve, CAGR (IST). Unrealized PnL (teilweise Overlay), Patterns (IST via Feature Flag VEK_PATTERNS)
+2) Analytics: REALIZED PnL, Win-Rate, Profit-Factor, realized MaxDD, Holding-Dauer avg, realized Equity Curve, CAGR (IST). Unrealized PnL (Overlay), Patterns (Histogram/Scatter, Flag `VEK_PATTERNS`). Risk Metrics (VaR/ES/Rolling VaR – Flag `VEK_RISK_METRICS`).
 3) Patterns: Histogramme Holding-Dauer, Scatter Entry vs Return (IST in Analytics Tab, hinter VEK_PATTERNS)
-4) Simulation: Parameter (basic: steps, seed, momentum window) + Persistenz data/results/<ts>_<hash>/ (IST); Erweiterte Parameter (TP/SL/Kosten) (offen). UI Mismatch: Erfolgsmeldung erwartet folder-Key im Result (Backlog P0)
+4) Simulation: Parameter (basic: steps, seed, momentum window) + Persistenz data/results/<ts>_<hash>/ (IST); Erweiterte Parameter (TP/SL/Kosten) (IMPLEMENTIERT). UI Persistenz: Hash & Zeitstempel anzeigen (Nice-to-have: Link Button). 
 5) DevTools: Pytest Runner (Filter, Status, Logs) (IST) + Lint (Increment A) + Benchmarks (Increment B) + Snapshots (Increment C) + Queued Test Runner (Increment G)
-6) Retrieval/DecisionCards: Backend Stubs vorhanden, UI Panel (offen)
+6) Retrieval/DecisionCards: Retrieval Panel (Query, Limit) Basic+Advanced+Embedding (Flags `VEK_RETRIEVAL_ADV`, `VEK_RETRIEVAL_EMB`). DecisionCard Panel (Create/List) – Workflow Status & Reviewer Anzeige (Review / Approve / Reject Buttons geplante Erweiterung). Expiry Indikator (wenn `expires_at` < now rot / warnend).
 7) Live Quotes (optional): offen
+8) Theming: Dark Mode (Flag `VEK_CONSOLE_DARK`) – invertierte Farbpalette für Charts (Hintergrund #1e1e1e, angepasste Axis/Label Farben).
+9) Planned Visualization Extensions:
+	- Regime Overlay: Farbband auf Equity Curve (Flag `VEK_REGIME`).
+	- Portfolio Allocation: Stapel-Flächenchart für Kapitalanteil je Strategie (Flag `VEK_PORTFOLIO`).
+	- Failure Clusters: Bar/Scatter mit Cluster Loss Contribution (Flag `VEK_FAILURE_MINER`).
 
 Persistenz: meta.json (Parameter, Hash, final_cash) + equity.csv (Zeilen: ts,equity).
 
-Backlog: UI SimResult Rückgabemismatch (#1) ERLEDIGT, DecisionCard/Retrieval Panels (#10) PARTIAL (Tests & Erweiterungen offen) — siehe tmp_backlogCollection.md
+Backlog (UI Fokus):
+- DecisionCard Workflow Actions (approve/reject inline) + Audit Trail Modal.
+- Retrieval Filter Controls (ticker, as_of) + Regime Filter (nach Implementierung Regime Labeling).
+- Strategy Batch Runner Dashboard (grid results: param→metric heatmap, robustness summary).
+- Portfolio Optimizer Panel (policy selection, correlation matrix mini-heatmap).
+- Failure Pattern Miner Panel (cluster table + narrative preview).
+- Snapshot Numeric Diff UI Enhancements (highlight thresholds, toggle epsilon grouping).
 
 Increment A (prompt3_roadmap_implement):
 - Admin UI DevTools Sektion (Feature Flag `VEK_ADMIN_DEVTOOLS`, default=1)
@@ -76,4 +87,4 @@ Increment J:
 - Retry Button (Admin & Console) re-enqueues letzten Run mit identischen Filtern
 - Einzel-Run JSON Download + bestehende Export-Funktionen
 
-Backlog (Analytics Bezug): CAGR (#6) ERLEDIGT, Unrealized Equity Curve (#7), Pattern Analytics (#8) — siehe tmp_backlogCollection.md
+Backlog (Analytics Bezug): Unrealized Equity Curve Erweiterte Auswertungen (multi-ticker drill), Pattern Analytics zusätzliche Verteilungen, Regime & Attribution Visualisierung.
