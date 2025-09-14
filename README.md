@@ -59,6 +59,15 @@ Falls vor editable Installation ausgeführt, sorgt Bootstrap in den UI-Skripten 
 3. DecisionCard UI Integration + Retrieval Panel.
 4. (Optional) Live Quotes Feed (lokal Mock) für fortlaufende unrealized Updates.
 
+### DevTools (Aktuelle Inkremente)
+- Increment X1: Einheitliche Queue Run Formatierung via `app/ui/devtools_panel_helpers.format_queue_rows` (keine funktionalen Änderungen, nur Normalisierung & Testbarkeit). Keine neuen Dependencies; UI Panels `admin.py` und `console.py` nutzen Helper. Tests decken Normalisierung + Invalid Input ab.
+- Increment X2: Optionaler Output-Filter (`VEK_DEVTOOLS_OUTPUT_FILTER=1`) mit Helper `app/ui/devtools_output_filter.filter_output_sections` (stdout/stderr/summary selektiv anzeigen). Keine Breaking Changes – deaktiviert fällt auf Legacy-Anzeige zurück.
+- Increment X3: Lokales Telemetrie-Event System (`VEK_DEVTOOLS_VERBOSE=1`) via `app/ui/devtools_events.py` (emit/get_events) – rein in-memory, keine externen Sends.
+  - Nutzung: `VEK_DEVTOOLS_VERBOSE=1 streamlit run app/ui/console.py` aktiviert Event-Sammlung (max 100 Einträge, FIFO). Default=0 → keinerlei Overhead.
+- Increment X4: Session Test Run Log (`app/ui/devtools_session_log.py`) speichert letzte 50 Kurz-Einträge pro Session (Status/Counts/Selection) – reine In-Memory Anzeige (Expander im DevTools Tab).
+  - Kein Persist Layer; Verlassen der Streamlit Session leert den Verlauf (Audit bleibt über Queue-Persistenz getrennt gewährleistet).
+- Increment X5: Audit Export Helper (`app/ui/devtools_audit_export.py`) stellt JSON & CSV Export für letzten Testlauf bereit (keine Persistenz, reine On-Demand Serialisierung).
+
 ## CI
 Automatischer Lauf von `pytest -q` über GitHub Actions (`.github/workflows/ci.yml`). Artefakte: `data/devtools/**` (Queue Logs / Snapshots) werden bei jedem Run (immer) hochgeladen. Badge oben aktualisieren nach GitHub Repository Import (`OWNER/REPO` ersetzen).
 

@@ -130,12 +130,12 @@ if devtools_flag:
             q["last_poll"] = now
             # Rerun hint (Streamlit will rerun automatically after widget interactions)
         if q.get("runs"):
-            # Add derived column duration_s if not present
-            rows = q["runs"]
+            # Normalisierung via Helper (Increment X1)
+            from app.ui.devtools_panel_helpers import format_queue_rows as _fmt_rows
+            rows = _fmt_rows(q["runs"])
             try:
                 import pandas as pd
                 df = pd.DataFrame(rows)
-                # Show key columns subset if large
                 display_cols = [c for c in ["run_id","status","passed","failed","duration_s","queued_at","started_at","finished_at","stdout_truncated","stderr_truncated"] if c in df.columns]
                 st.dataframe(df[display_cols])
             except Exception:

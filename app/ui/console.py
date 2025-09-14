@@ -403,6 +403,7 @@ with tabs[2]:
                     st.line_chart(df.set_index('ts'))
 
 from app.ui import devtools_shared as _dshared  # unified wrappers
+import os as _os
 
 # DevTools Tab (refactored to use app.core.devtools)
 with tabs[3]:
@@ -419,6 +420,8 @@ with tabs[3]:
                 "module": "",
                 "collected": [],
                 "selected": set(),
+                "summary": None,
+                "sections": ["stdout", "summary"],
             }
         s = st.session_state.dt_state
         c1, c2, c3 = st.columns([3,1,1])
@@ -461,15 +464,114 @@ with tabs[3]:
                                           k_expr=s["filter"].strip() or None,
                                           module_substr=s["module"].strip() or None)
             s["stdout"], s["stderr"], s["status"] = res["stdout"], res["stderr"], res["status"]
+            # Persist summary counts to session (robuster als flüchtige Variable 'res')
+            s["summary"] = {"passed": res.get("passed", 0), "failed": res.get("failed", 0)}
+            # Telemetry (Increment X3) – nur lokal bei Flag
+            try:
+                from app.ui import devtools_events as _dt_events
+                _dt_events.emit("test_run", {"status": s["status"], **s["summary"], "selected": len(s.get("selected", []))})
+                if s["status"] == "failed":
+                    _dt_events.emit("test_run_failed", {"failed": s["summary"].get("failed", 0)})
+            except Exception:
+                # Hard-fail vermeiden; Telemetrie darf UI nicht stören
+                pass
+            # Session Log (Increment X4)
+            try:
+                from app.ui import devtools_session_log as _sess_log
+                _sess_log.add_test_run({
+                    "status": s["status"],
+                    "passed": s["summary"]["passed"],
+                    "failed": s["summary"]["failed"],
+                    "selected": len(s.get("selected", [])),
+                })
+            except Exception:
+                pass
 
-        with st.expander("Test Output", expanded=True):
-            st.code(s["stdout"] or "(empty)")
-            if s["stdout"]:
-                if res["passed"] or res["failed"]:
-                    st.markdown(f"**Summary:** ✅ {res['passed']} | ❌ {res['failed']}")
-        if s["stderr"]:
-            with st.expander("Errors/StdErr"):
-                st.code(s["stderr"])
+        # --- Output Filter (Increment X2) ---
+        output_filter_flag = bool(int(_os.environ.get("VEK_DEVTOOLS_OUTPUT_FILTER", "1")))
+        if output_filter_flag:
+            from app.ui.devtools_output_filter import filter_output_sections as _filter_out
+            s["sections"] = st.multiselect(
+                "Output Sections",
+                options=["stdout", "stderr", "summary"],
+                default=s.get("sections", ["stdout", "summary"]),
+                help="Wähle welche Output-Sektionen angezeigt werden sollen",
+                key="dt_sections_sel"
+            ) or []
+            data_map = {"stdout": s.get("stdout"), "stderr": s.get("stderr"), "summary": s.get("summary")}
+            filtered = _filter_out(data_map, s["sections"])
+            if not filtered:
+                st.caption("(Keine Sektionen ausgewählt)")
+            else:
+                if "stdout" in filtered:
+                    with st.expander("Test Output", expanded=True):
+                        st.code(filtered["stdout"] or "(empty)")
+                if "summary" in filtered and isinstance(filtered.get("summary"), dict):
+                    summ = filtered["summary"]
+                    st.markdown(f"**Summary:** ✅ {summ.get('passed',0)} | ❌ {summ.get('failed',0)}")
+                if "stderr" in filtered and filtered.get("stderr"):
+                    with st.expander("Errors/StdErr", expanded=False):
+                        st.code(filtered["stderr"])
+            # Audit Export Buttons (Increment X5)
+            from app.ui import devtools_audit_export as _audit
+            exp_col1, exp_col2 = st.columns([1,1])
+            with exp_col1:
+                if st.button("Export JSON (Last Run)"):
+                    js = _audit.export_json(s)
+                    if js:
+                        st.download_button("Download JSON", data=js, file_name="last_test_run.json")
+                    else:
+                        st.info("Kein Testlauf vorhanden.")
+            with exp_col2:
+                if st.button("Export CSV (Last Run)"):
+                    csv_txt = _audit.export_csv(s)
+                    if csv_txt:
+                        st.download_button("Download CSV", data=csv_txt, file_name="last_test_run.csv")
+                    else:
+                        st.info("Kein Testlauf vorhanden.")
+        else:
+            # Legacy Darstellung ohne Filter
+            with st.expander("Test Output", expanded=True):
+                st.code(s["stdout"] or "(empty)")
+                if isinstance(s.get("summary"), dict):
+                    st.markdown(f"**Summary:** ✅ {s['summary'].get('passed',0)} | ❌ {s['summary'].get('failed',0)}")
+            if s.get("stderr"):
+                with st.expander("Errors/StdErr"):
+                    st.code(s["stderr"])
+            # Audit Export (Legacy Mode)
+            from app.ui import devtools_audit_export as _audit
+            exp_l1, exp_l2 = st.columns([1,1])
+            with exp_l1:
+                if st.button("Export JSON (Last Run)", key="legacy_exp_json"):
+                    js = _audit.export_json(s)
+                    if js:
+                        st.download_button("Download JSON", data=js, file_name="last_test_run.json")
+                    else:
+                        st.info("Kein Testlauf vorhanden.")
+            with exp_l2:
+                if st.button("Export CSV (Last Run)", key="legacy_exp_csv"):
+                    csv_txt = _audit.export_csv(s)
+                    if csv_txt:
+                        st.download_button("Download CSV", data=csv_txt, file_name="last_test_run.csv")
+                    else:
+                        st.info("Kein Testlauf vorhanden.")
+        # Session Log Panel (Increment X4)
+        with st.expander("Session Test Runs", expanded=False):
+            from app.ui import devtools_session_log as _sess_log
+            # Filter UI
+            sel_status = st.multiselect("Status Filter", ["passed","failed","error"], default=[])
+            runs_view = _sess_log.list_test_runs(limit=25, status=sel_status or None)
+            if runs_view:
+                try:
+                    import pandas as pd
+                    df_runs = pd.DataFrame(runs_view)
+                    df_runs = df_runs.sort_values("ts", ascending=False)
+                    cols = [c for c in ["ts","status","passed","failed","selected"] if c in df_runs.columns]
+                    st.dataframe(df_runs[cols])
+                except Exception:
+                    st.json(runs_view)
+            else:
+                st.caption("Keine Session Runs.")
         # Lint Panel
         st.markdown("---")
         st.subheader("Lint Checks (Lightweight)")
@@ -587,7 +689,8 @@ with tabs[3]:
             qs["runs"] = _adm_dt.list_test_runs(limit=25, status=qs.get("status_filter") or None, include_persisted=qs.get("show_persisted", True))
             qs["last_poll"] = now_q
         if qs.get("runs"):
-            rows = qs["runs"]
+            from app.ui.devtools_panel_helpers import format_queue_rows as _fmt_rows
+            rows = _fmt_rows(qs["runs"])
             try:
                 import pandas as pd
                 df = pd.DataFrame(rows)
