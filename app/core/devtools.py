@@ -31,7 +31,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Optional
-import subprocess, sys, re, os
+import subprocess, sys, re, os, time
 from pathlib import Path
 
 # Public export list (initialized early so later additive helpers can append)
@@ -100,7 +100,7 @@ def discover_tests(k_expr: str | None = None, module_substr: str | None = None, 
     return nodeids
 
 
-def run_tests(nodeids: List[str] | None = None, k_expr: str | None = None, module_substr: str | None = None, timeout: int = 120) -> TestRunResult:
+def run_tests(nodeids: List[str] | None = None, k_expr: str | None = None, module_substr: str | None = None, timeout: int = 120, maxfail: int | None = None) -> TestRunResult:
     """Run tests and return structured result.
     Precedence: explicit nodeids > k_expr/module filters.
     Status Mapping:
@@ -109,6 +109,16 @@ def run_tests(nodeids: List[str] | None = None, k_expr: str | None = None, modul
       Exception (timeout/spawn) -> error
     """
     args = [sys.executable, "-m", "pytest", "-q"]
+    if maxfail is None:
+        # allow override via env
+        try:
+            mf_env = os.environ.get("VEK_TEST_MAXFAIL")
+            if mf_env:
+                maxfail = int(mf_env)
+        except Exception:
+            maxfail = None
+    if maxfail:
+        args.extend(["--maxfail", str(maxfail)])
     if nodeids:
         args.extend(nodeids)
     else:
@@ -116,6 +126,23 @@ def run_tests(nodeids: List[str] | None = None, k_expr: str | None = None, modul
             args.extend(["-k", k_expr])
         for mod_arg in _resolve_module_args(module_substr):
             args.append(mod_arg)
+    # Simple file lock to avoid concurrent heavy test runs (best-effort)
+    lock_path = Path('.pytest_run.lock')
+    lock_acquired = False
+    lock_wait_start = time.time()
+    lock_timeout = int(os.environ.get("VEK_TEST_LOCK_TIMEOUT", "30"))
+    while not lock_acquired:
+        try:
+            # exclusive create
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            lock_acquired = True
+        except FileExistsError:
+            if time.time() - lock_wait_start > lock_timeout:
+                # give up; proceed anyway
+                break
+            time.sleep(0.25)
     try:
         proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
         rc = proc.returncode
@@ -123,6 +150,12 @@ def run_tests(nodeids: List[str] | None = None, k_expr: str | None = None, modul
         return TestRunResult(status=status, returncode=rc, stdout=proc.stdout or "", stderr=proc.stderr or "")
     except Exception as e:  # Timeout oder Prozessfehler
         return TestRunResult(status="error", returncode=None, stdout="", stderr=str(e))
+    finally:
+        if lock_acquired:
+            try:
+                lock_path.unlink(missing_ok=True)  # py>=3.8
+            except Exception:
+                pass
 
 
 def parse_summary(stdout: str) -> dict:

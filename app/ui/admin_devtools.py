@@ -1,214 +1,135 @@
-"""
-# ============================================================
-# Context Banner — admin_devtools | Category: ui
-# Purpose: Streamlit-unabhängige Helper für Admin/Console DevTools (Tests, Lint, Benchmarks, Snapshots, Queued Test Runner)
+"""Deprecated shim after migration to `app.internal.admin_devtools`.
 
-# Contracts
-#   run_test_subset(k_expr) -> dict(status, passed, failed, stdout, stderr)
-#   run_lint_report() -> dict (LintReport)
-#   run_benchmark(target, repeat) -> dict (inkl. Persist Delta)
-#   run_snapshot(target, update) -> dict (Diff & Summary)
-#   Queue API: submit_test_run, list_test_runs(status?, include_persisted), get_test_run, get_test_run_output, retry_test_run
-#   Alle Funktionen Streamlit-frei → unit-testbar
-#
-# Invariants
-#   - Keine neuen externen Dependencies
-#   - Queue Persistenz: data/devtools/testqueue_runs.jsonl + testqueue_outputs/*.out (über core.testqueue)
-#   - Keine sys.path Hacks
-#   - Deterministisch für stabile Codebasis
-#
-# Dependencies
-#   Internal: app.core.devtools, app.core.linttools
-#   External: stdlib
-#
-# Tests
-#   tests/test_admin_devtools.py
-#   tests/test_test_center_facade.py  # Increment I1
-#
-# Do-Not-Change
-#   Banner policy-relevant
-#   Increment I1 (Test Center Facade): additive Helpers run_test_center/get_test_center_artifacts ohne Breaking Change
-# ============================================================
+Investor UI removed DevTools panels; this module remains only to avoid breaking existing imports.
+Will be removed in a future cleanup release.
 """
 from __future__ import annotations
-from typing import Optional, Dict, Any
-from app.core import devtools as _dev
-from app.core import linttools as _lint
-from app.core import benchtools as _bench
-from app.core import snapshots as _snap
-from app.core import testqueue as _tq  # queued test runner (parallel/persistent)
-
-
-def run_test_subset(k_expr: Optional[str] = None, max_tests: int = 5) -> Dict[str, Any]:
-    """Run (optionally filtered) tests with a soft cap to keep runtime low in Admin UI.
-    Strategy:
-      1. If k_expr provided -> discover nodeids via devtools.discover_tests(k_expr)
-      2. Limit to first `max_tests` nodeids (deterministic order from pytest)
-      3. Run those nodeids directly (faster than full -k run)
-      4. If discovery yields no tests, fallback to k_expr run (may return passed=0)
-    Returns dict(status, passed, failed, stdout, stderr).
-    Any discovery exception is converted into status 'error' with stderr message.
-    """
-    nodeids: Optional[list[str]] = None
-    if k_expr:
-        try:
-            discovered = _dev.discover_tests(k_expr=k_expr, module_substr=None)
-            if discovered:
-                # Filter out potentially recursive or heavy tests (admin_devtools itself & queue extended) to keep fast
-                filtered = [n for n in discovered if 'test_admin_devtools.py::test_admin_devtools_run_subset_metrics' not in n and 'queue_metrics_ext' not in n]
-                if not filtered:
-                    filtered = discovered
-                nodeids = filtered[:max_tests]
-        except Exception as e:  # discovery failed -> graceful fallback to direct -k run
-            nodeids = None  # ensure fallback path
-            fallback_note = f"discovery error: {e}"
-        else:
-            fallback_note = ""
-    # Run tests (either subset nodeids or fallback full expression)
-    # Use a shorter timeout for UI subset runs to keep responsiveness high
-    res = _dev.run_tests(nodeids=nodeids, k_expr=None if nodeids else (k_expr or None), module_substr=None, timeout=120)
-    summary = _dev.parse_summary(res.stdout)
-    stderr_combined = res.stderr
-    # Append discovery fallback note if present
-    if 'fallback_note' in locals() and fallback_note and res.stderr.find(fallback_note) == -1:
-        stderr_combined = (stderr_combined + ("\n" if stderr_combined else "") + fallback_note)
-    return {
-        "status": res.status,
-        "passed": summary["passed"],
-        "failed": summary["failed"],
-        "stdout": res.stdout,
-        "stderr": stderr_combined,
-    }
-
-
-def run_lint_report() -> Dict[str, Any]:
-    rep = _lint.run_lint().to_dict()
-    return rep
-
-
-def run_benchmark(target: str, repeat: int = 3) -> Dict[str, Any]:
-    """Execute a registered benchmark target and return its dict representation.
-    Negative case: unknown target -> ValueError propagated to caller (UI handles).
-    """
-    res = _bench.run_benchmark(target=target, repeat=repeat, persist=True)
-    return res.to_dict()
-
-
-def list_benchmarks() -> Dict[str, str]:
-    return _bench.get_registry()
-
-
-# Snapshot wrappers
-def list_snapshot_targets() -> list[str]:
-    return ["metrics", "equity_curve", "equity_curve_unrealized", "equity_curve_per_ticker"]
-
-
-def run_snapshot(target: str, update: bool = False) -> Dict[str, Any]:
-    if target not in list_snapshot_targets():
-        raise ValueError(f"Unknown snapshot target: {target}")
-    res = _snap.ensure_and_diff(target, update=update)
-    return res.to_dict()
-
+from app.internal.admin_devtools import *  # type: ignore F401,F403
 
 __all__ = [
-    "run_test_subset",
-    "run_lint_report",
-    "run_benchmark",
-    "list_benchmarks",
-    "list_snapshot_targets",
-    "run_snapshot",
-    # queue api
-    "submit_test_run","get_test_run","list_test_runs","process_test_queue","ensure_testqueue_workers","get_test_run_output","retry_test_run","get_queue_aggregates",
-    # test center facade
-    "run_test_center",
-    "get_test_center_artifacts",
-    "list_test_center_runs",
-    "get_test_center_run",
+    'run_tests','run_lint_report','list_benchmarks','list_snapshot_targets','run_snapshot',
+    'run_test_center','test_center_flag_enabled','submit_test_run','list_test_runs','get_test_run','get_test_run_output','retry_test_run',
+    'parse_coverage_xml_safe','parse_junit_xml_safe','summarize_test_center_runs','artifact_file_readable'
 ]
 
 
-# --- Increment: Queued Test Runner (prompt3_roadmap_implement) ---
-def submit_test_run(k_expr: str | None = None, module_substr: str | None = None) -> str:
-    return _tq.submit_run(k_expr=k_expr, module_substr=module_substr)
+def get_test_center_artifacts() -> dict | None:  # deprecated no-op
+    return None
 
 
-def get_test_run(run_id: str):
-    return _tq.get_status(run_id)
+def list_test_center_runs(limit: int = 10) -> list[dict]:  # deprecated no-op
+    return []
 
 
-def list_test_runs(limit: int = 20, status: list[str] | None = None, include_persisted: bool = True):
-    # Legacy tick (still supports non-worker mode); in worker mode active runs progress asynchronously
-    _tq.process_next()
-    return _tq.list_runs(limit=limit, status=status, include_persisted=include_persisted)
+def get_test_center_run(run_id: str) -> dict:  # deprecated always raises
+    raise ValueError("test center UI removed")
 
 
-def process_test_queue():  # optional explicit tick
-    return _tq.process_next()
+# --- Increment I1 Helpers (UI-safe, streamlit-frei testbar) ---
+def test_center_flag_enabled() -> bool:
+    """Return True if Test Center Panel should be visible (env flag VEK_TEST_CENTER=1). Default off."""
+    import os
+    return bool(int(os.environ.get("VEK_TEST_CENTER", "0")))
 
 
-def ensure_testqueue_workers():
-    return _tq.ensure_workers()
+def test_center_latest_summary_exists() -> bool:  # deprecated always False
+    return False
 
 
-def get_test_run_output(run_id: str):
-    return _tq.get_full_output(run_id)
-
-
-def retry_test_run(run_id: str):
-    return _tq.retry_run(run_id)
-
-
-def get_queue_aggregates(limit: int = 100):
-    """Return simple aggregate metrics for recent finished runs (core.testqueue.aggregate_metrics)."""
-    return _tq.aggregate_metrics(limit=limit)
-
-
-# --- Increment I1: Test Center Facade (artefaktorientiert) ---
-_LAST_TEST_CENTER: dict | None = None
-# Ringpuffer für Historie der letzten Läufe (nur im Speicher, keine Persistenz) – max 20 Einträge
-from collections import deque as _deque
-_TEST_CENTER_HISTORY = _deque(maxlen=20)
-
-def run_test_center(k_expr: str | None = None, module_substr: str | None = None, nodeids: list[str] | None = None) -> dict:
-    """Führt Tests aus und erzeugt Artefakte (JUnit, Coverage, Summary) via core.devtools.run_tests_with_artifacts.
-    Rückgabe: { run_id, status, passed, failed, stdout_truncated, stderr_truncated, artifacts:{...} }
-    Truncation hält UI reaktionsfähig.
+# --- Increment I2: Coverage / JUnit parsing + summarization (additive, streamlit-frei) ---
+def parse_coverage_xml_safe(path: str | None) -> dict:
+    """Parse minimal coverage percent from a coverage.xml (pytest-cov) file.
+    Returns {'coverage_pct': float|None}. Never raises; invalid/missing -> None.
     """
-    global _LAST_TEST_CENTER
-    result, arts = _dev.run_tests_with_artifacts(nodeids=nodeids, k_expr=k_expr, module_substr=module_substr)
-    summary = _dev.parse_summary(result.stdout)
-    def _trunc(txt: str, limit: int = 4000):
-        return txt if len(txt) <= limit else txt[:limit] + "\n...<truncated>"  # UI expand optional
-    payload = {
-        "run_id": arts['run_id'],
-        "status": result.status,
-        "passed": summary['passed'],
-        "failed": summary['failed'],
-        "stdout_truncated": _trunc(result.stdout),
-        "stderr_truncated": _trunc(result.stderr),
-        "artifacts": arts['paths'],
-    }
-    _LAST_TEST_CENTER = payload
-    # In Historie aufnehmen (neuste vorne für ergonomische Anzeige beim Reverse in list())
-    _TEST_CENTER_HISTORY.append(payload)
-    return payload
+    if not path:
+        return {"coverage_pct": None}
+    try:
+        from xml.etree import ElementTree as ET
+        import os
+        if not os.path.exists(path):
+            return {"coverage_pct": None}
+        tree = ET.parse(path)
+        root = tree.getroot()
+        # pytest-cov xml root tag is <coverage line-rate="0.85" ...>
+        line_rate = root.get("line-rate")
+        if line_rate is None:
+            return {"coverage_pct": None}
+        try:
+            pct = round(float(line_rate) * 100, 2)
+        except Exception:
+            pct = None
+        return {"coverage_pct": pct}
+    except Exception:
+        return {"coverage_pct": None}
 
 
-def get_test_center_artifacts() -> dict | None:
-    return _LAST_TEST_CENTER
+def parse_junit_xml_safe(path: str | None) -> dict:
+    """Parse minimal JUnit summary: tests, failures, errors from junit.xml.
+    Returns {'tests': int|None,'failures':int|None,'errors':int|None}. Never raises.
+    """
+    if not path:
+        return {"tests": None, "failures": None, "errors": None}
+    try:
+        from xml.etree import ElementTree as ET
+        import os
+        if not os.path.exists(path):
+            return {"tests": None, "failures": None, "errors": None}
+        tree = ET.parse(path)
+        root = tree.getroot()
+        # Root could be <testsuite> or <testsuites>
+        if root.tag == "testsuite":
+            tests = root.get("tests")
+            failures = root.get("failures")
+            errors = root.get("errors")
+        else:
+            # aggregate testsuites children
+            tests = failures = errors = 0
+            found = False
+            for ts in root.findall("testsuite"):
+                found = True
+                try:
+                    tests += int(ts.get("tests", 0))
+                    failures += int(ts.get("failures", 0))
+                    errors += int(ts.get("errors", 0))
+                except Exception:
+                    pass
+            if not found:
+                tests = failures = errors = None
+        def _toi(x):
+            try:
+                return int(x) if x is not None else None
+            except Exception:
+                return None
+        return {"tests": _toi(tests), "failures": _toi(failures), "errors": _toi(errors)}
+    except Exception:
+        return {"tests": None, "failures": None, "errors": None}
 
 
-def list_test_center_runs(limit: int = 10) -> list[dict]:
-    """Gibt bis zu `limit` letzte Test Center Runs (neueste zuerst) zurück.
-    Nur In-Memory (kein Disk State)."""
-    items = list(_TEST_CENTER_HISTORY)[-limit:]
-    return list(reversed(items))
+def artifact_file_readable(path: str | None, size_limit: int = 200_000) -> bool:
+    """Return True if artifact file exists & below size limit (for safe on-demand download)."""
+    if not path:
+        return False
+    try:
+        import os
+        return os.path.exists(path) and os.path.getsize(path) <= size_limit
+    except Exception:
+        return False
 
 
-def get_test_center_run(run_id: str) -> dict:
-    """Lookup eines Laufes aus der In-Memory Historie.
-    Raises ValueError bei unbekannter ID (Negativtest sichert Verhalten)."""
-    for item in _TEST_CENTER_HISTORY:
-        if item.get("run_id") == run_id:
-            return item
-    raise ValueError(f"Unknown test center run_id: {run_id}")
+def summarize_test_center_runs(limit: int = 5) -> list[dict]:
+    """Return recent runs with parsed coverage/junit summary fields added.
+    Each item extended with coverage_pct, junit_tests, junit_failures, junit_errors.
+    """
+    runs = list_test_center_runs(limit=limit)
+    out: list[dict] = []
+    for r in runs:
+        arts = r.get("artifacts") or {}
+        cov = parse_coverage_xml_safe(arts.get("coverage"))
+        ju = parse_junit_xml_safe(arts.get("junit"))
+        enriched = dict(r)
+        enriched["coverage_pct"] = cov.get("coverage_pct")
+        enriched["junit_tests"] = ju.get("tests")
+        enriched["junit_failures"] = ju.get("failures")
+        enriched["junit_errors"] = ju.get("errors")
+        out.append(enriched)
+    return out

@@ -219,3 +219,8 @@ def transition_status(card: DecisionCard, new_status: str, reviewer: str | None 
     if reviewer and reviewer not in card.reviewers:
         card.reviewers.append(reviewer)
     return card
+
+# Explicit exports
+__all__ = [
+    'ActionSpec','DecisionCard','make_decision_card','transition_status'
+]

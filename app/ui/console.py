@@ -127,6 +127,77 @@ with tabs[0]:
                 st.success("CSV gespeichert")
             except Exception as e:
                 st.error(f"Export Fehler: {e}")
+    # --- Import Assistant (Schema Detect & Diff Preview) ---
+    st.markdown("---")
+    with st.expander("Import Assistant (CSV Schema & Diff)", expanded=False):
+        from app.core.trade_import import infer_csv_schema, parse_csv_text, diff_trades
+        mode = st.radio("Quelle", ["Paste CSV", "Upload File"], horizontal=True, key="imp_mode")
+        csv_text = ""
+        upload_rows = []
+        if mode == "Paste CSV":
+            csv_text = st.text_area("CSV Text", height=160, placeholder="trade_id,ts,ticker,action,shares,price,fees\n...")
+            rows = parse_csv_text(csv_text) if csv_text.strip() else []
+        else:
+            up = st.file_uploader("CSV Datei", type=["csv"], accept_multiple_files=False)
+            if up is not None:
+                try:
+                    csv_text = up.read().decode("utf-8")
+                except Exception as e:
+                    st.error(f"Decode Fehler: {e}")
+                rows = parse_csv_text(csv_text) if csv_text else []
+            else:
+                rows = []
+        # Schema inference
+        if csv_text.strip():
+            schema = infer_csv_schema(csv_text)
+            sc1, sc2 = st.columns([2,1])
+            with sc1:
+                st.caption("Schema Resultat")
+                st.json({k: schema[k] for k in ["header","required_missing","unexpected","row_count","valid"]})
+            with sc2:
+                if schema.get("issues"):
+                    st.caption("Schema Issues")
+                    for iss in schema["issues"]:
+                        st.warning(iss)
+            # Diff vs existing repo
+            if rows:
+                diff = diff_trades(repo.all(), rows)
+                st.caption("Diff Zusammenfassung")
+                st.json({k: diff[k] for k in ["candidate_count","importable_count"]})
+                col_d1, col_d2, col_d3 = st.columns(3)
+                with col_d1:
+                    st.caption("Neue Trades")
+                    st.code("\n".join(diff["new_ids"]) or "(none)")
+                with col_d2:
+                    st.caption("Geändert (trade_id)")
+                    st.code("\n".join(diff["changed"]) or "(none)")
+                with col_d3:
+                    st.caption("Duplikate")
+                    st.code("\n".join(diff["duplicate_ids"]) or "(none)")
+                if diff.get("issues"):
+                    st.caption("Import Issues")
+                    for iss in diff["issues"][:20]:
+                        st.info(iss)
+                # Apply import (only new, valid)
+                if diff.get("new_ids") and st.button(f"Importiere {diff['importable_count']} neue Trades", key="do_import_trades"):
+                    from app.core.trade_model import validate_trade_dict, TradeValidationError
+                    added = 0
+                    for r in rows:
+                        if str(r.get("trade_id")) in diff["new_ids"]:
+                            try:
+                                repo.add_trade(validate_trade_dict(r))
+                                added += 1
+                            except TradeValidationError as e:
+                                st.error(f"Fehler bei {r.get('trade_id')}: {e}")
+                    if added:
+                        try:
+                            repo.export_csv(trades_path)
+                        except Exception:
+                            pass
+                        st.success(f"{added} Trades importiert & gespeichert.")
+                        st.experimental_rerun()
+        else:
+            st.caption("Füge CSV Text ein oder lade eine Datei hoch, um Schema zu prüfen.")
 
 # Analytics Tab
 with tabs[1]:
@@ -392,6 +463,77 @@ with tabs[1]:
                         st.bar_chart(dfb)
                 else:
                     st.info("No realized returns yet for distribution.")
+            # Portfolio Exposure Timeline (stacked by ticker) outside two-column layout to use full width
+            with st.expander("Portfolio Exposure Timeline", expanded=False):
+                trades = repo.all()
+                if trades:
+                    try:
+                        import pandas as pd
+                        # Build exposure per trade per ticker (using cumulative lot valuation at execution price)
+                        rows = []
+                        inventory: dict[str, list[tuple[float,float]]] = {}
+                        for t in sorted(trades, key=lambda x: x.ts):
+                            if t.action == "BUY":
+                                inventory.setdefault(t.ticker, []).append((t.shares, t.price))
+                            else:  # SELL
+                                lots = inventory.get(t.ticker, [])
+                                remaining = t.shares
+                                i = 0
+                                while remaining > 1e-12 and i < len(lots):
+                                    lot_sh, lot_price = lots[i]
+                                    take = min(lot_sh, remaining)
+                                    lot_sh -= take
+                                    remaining -= take
+                                    if lot_sh <= 1e-12:
+                                        lots.pop(i)
+                                    else:
+                                        lots[i] = (lot_sh, lot_price)
+                                        i += 1
+                            # compute per-ticker exposure snapshot after this trade
+                            snap: dict[str,float] = {}
+                            for tick, lots in inventory.items():
+                                exp = 0.0
+                                for lot_sh, lot_price in lots:
+                                    exp += lot_sh * lot_price
+                                if exp > 0:
+                                    snap[tick] = round(exp, 6)
+                            if snap:
+                                snap["ts"] = t.ts
+                                rows.append(snap)
+                        if rows:
+                            dfexp = pd.DataFrame(rows).fillna(0.0)
+                            dfexp = dfexp.set_index("ts")
+                            # Convert ts to string for Streamlit if needed
+                            dfexp.index = dfexp.index.map(lambda x: x.isoformat() if hasattr(x, 'isoformat') else x)
+                            st.caption("Stacked Gross Exposure by Ticker (execution price marked exposure)")
+                            try:
+                                import altair as alt
+                                df_long = dfexp.reset_index().melt(id_vars=["ts"], var_name="ticker", value_name="exposure")
+                                chart = alt.Chart(df_long).mark_area().encode(
+                                    x=alt.X("ts:T", title="Timestamp"),
+                                    y=alt.Y("exposure:Q", stack='normalize', title="Exposure (Normalized)"),
+                                    color=alt.Color("ticker:N", legend=alt.Legend(title="Ticker")),
+                                    tooltip=["ts","ticker","exposure"]
+                                ).properties(height=240)
+                                st.altair_chart(chart, use_container_width=True)
+                                st.caption("Normalized stack (each area shows proportion of total gross exposure).")
+                                # Absolute stacked variant
+                                chart_abs = alt.Chart(df_long).mark_area().encode(
+                                    x=alt.X("ts:T", title="Timestamp"),
+                                    y=alt.Y("exposure:Q", stack='zero', title="Exposure (Absolute)"),
+                                    color=alt.Color("ticker:N", legend=None),
+                                    tooltip=["ts","ticker","exposure"]
+                                ).properties(height=240)
+                                st.altair_chart(chart_abs, use_container_width=True)
+                            except Exception as _e_exp:
+                                st.dataframe(dfexp)
+                                st.caption(f"(Altair fallback: {_e_exp})")
+                        else:
+                            st.info("No exposure snapshots to display.")
+                    except Exception as e:
+                        st.warning(f"Exposure timeline error: {e}")
+                else:
+                    st.info("No trades loaded.")
         # --- Increment I2: Research Preview Panels (Attribution & Portfolio) ---
         try:
             from app.ui.research_preview import panels_enabled as _rp_enabled, attribution_preview as _attr_prev, portfolio_preview as _port_prev
@@ -817,6 +959,7 @@ with tabs[3]:
             res = _dshared.snapshot(ss["target"], update=ss["update"])
             ss["result"] = res
         if ss.get("result"):
+            # Removed Snapshot Regression & Dev/Test Queue UI (investor-focused redesign)
             res = ss["result"]
             summary = res.get("summary") if isinstance(res, dict) else None
             if summary:
@@ -834,85 +977,7 @@ with tabs[3]:
                     st.dataframe(pd.DataFrame(nd))
                 except Exception:
                     st.caption("(numeric deltas table unavailable)")
-        st.caption("Snapshots verwenden deterministische Sample Trades; Baselines unter data/devtools/snapshots/")
-        # Queued Test Runner Panel (Portierung aus Admin, Auto-Refresh)
-        st.markdown("---")
-        st.subheader("Queued Test Runner")
-        from app.ui import admin_devtools as _adm_dt
-        if "queue_state" not in st.session_state:
-            st.session_state.queue_state = {"filter": "metrics", "runs": [], "last_id": None, "auto": True, "interval": 5, "last_poll": 0.0}
-        qs = st.session_state.queue_state
-        qc1, qc2, qc3, qc4, qc5 = st.columns([3,1,1,1,1])
-        with qc1:
-            qs["filter"] = st.text_input("Queue -k Filter", qs["filter"], key="cons_q_filter")
-        with qc2:
-            if st.button("Queue Run", key="cons_q_submit"):
-                qs["last_id"] = _adm_dt.submit_test_run(k_expr=qs["filter"].strip() or None)
-        with qc3:
-            qs["auto"] = st.checkbox("Auto", value=qs.get("auto", True), key="cons_q_auto")
-        with qc4:
-            qs["interval"] = st.number_input("Interval s", min_value=2, max_value=60, value=int(qs.get("interval",5)), step=1, key="cons_q_int")
-        with qc5:
-            qs["status_filter"] = st.multiselect("Status", ["queued","running","passed","failed","error"], default=qs.get("status_filter",[]), key="cons_q_status")
-        qs["show_persisted"] = st.checkbox("Persisted", value=qs.get("show_persisted", True), key="cons_q_persisted")
-        if st.button("Refresh Now", key="cons_q_refresh"):
-            qs["runs"] = _adm_dt.list_test_runs(limit=25, status=qs.get("status_filter") or None, include_persisted=qs.get("show_persisted", True))
-            import time as _time
-            qs["last_poll"] = _time.time()
-        import time as _time
-        now_q = _time.time()
-        if qs.get("auto") and (now_q - qs.get("last_poll",0) >= qs.get("interval",5)):
-            qs["runs"] = _adm_dt.list_test_runs(limit=25, status=qs.get("status_filter") or None, include_persisted=qs.get("show_persisted", True))
-            qs["last_poll"] = now_q
-        if qs.get("runs"):
-            from app.ui.devtools_panel_helpers import format_queue_rows as _fmt_rows
-            rows = _fmt_rows(qs["runs"])
-            try:
-                import pandas as pd
-                df = pd.DataFrame(rows)
-                cols = [c for c in ["run_id","status","passed","failed","duration_s","queued_at","started_at","finished_at","stdout_truncated","stderr_truncated"] if c in df.columns]
-                st.dataframe(df[cols])
-            except Exception:
-                st.json(rows)
-            ec1, ec2, ec3 = st.columns([1,1,1])
-            with ec1:
-                if st.button("Export JSON", key="cons_q_export_json"):
-                    import json as _json
-                    st.download_button("Download JSON", data=_json.dumps(rows, ensure_ascii=False, indent=2), file_name="testqueue_runs.json")
-            with ec2:
-                if st.button("Export CSV", key="cons_q_export_csv"):
-                    import csv, io
-                    if rows:
-                        buf = io.StringIO()
-                        writer = csv.DictWriter(buf, fieldnames=sorted({k for r in rows for k in r.keys()}))
-                        writer.writeheader()
-                        for r in rows:
-                            writer.writerow(r)
-                        st.download_button("Download CSV", data=buf.getvalue(), file_name="testqueue_runs.csv")
-            with ec3:
-                if qs.get("last_id"):
-                    from . import admin_devtools as _adm_dt
-                    if st.button("Full Output", key="cons_q_full_output"):
-                        full = _adm_dt.get_test_run_output(qs["last_id"])
-                        if full:
-                            st.code(full["stdout"] or "(empty)")
-                            if full.get("stderr"):
-                                st.code(full["stderr"], language="text")
-                            st.caption(full.get("note",""))
-                    if st.button("Retry Last", key="cons_q_retry_last"):
-                        new_id = _adm_dt.retry_test_run(qs["last_id"])
-                        if new_id:
-                            qs["last_id"] = new_id
-                    if st.button("Last JSON", key="cons_q_last_json"):
-                        import json as _json
-                        rid = qs["last_id"]
-                        st.download_button(
-                            "Download Last JSON",
-                            data=_json.dumps(_adm_dt.get_test_run(rid), ensure_ascii=False, indent=2),
-                            file_name=f"testqueue_run_{rid}.json",
-                        )
-        if qs.get("last_id"):
-            st.caption(f"Letzte Run ID: {qs['last_id']} | Status: {_adm_dt.get_test_run(qs['last_id'])['status'] if _adm_dt.get_test_run(qs['last_id']) else 'n/a'}")
+        st.caption("(Snapshot / Test Queue Panels entfernt – Fokus auf Investor Features)")
 
         # Strategy Batch Panel (Flag-gated: VEK_STRAT_SWEEP)
         if bool(int(_os.environ.get("VEK_STRAT_SWEEP", "0"))):
@@ -968,10 +1033,24 @@ with tabs[3]:
                                         } for r in rs
                                     ])
                                     st.dataframe(df)
+                                    # Heatmap (param_hash vs seed, aggregated mean CAGR per cell)
+                                    try:
+                                        import altair as alt
+                                        heat_df = df.groupby(["param_hash","seed"], as_index=False)["cagr"].mean()
+                                        from .console_theme import apply_console_theme
+                                        heat_chart = alt.Chart(heat_df).mark_rect().encode(
+                                            x=alt.X("param_hash:N", title="Param Hash"),
+                                            y=alt.Y("seed:O", title="Seed"),
+                                            color=alt.Color("cagr:Q", scale=alt.Scale(scheme="blues"), title="CAGR"),
+                                            tooltip=["param_hash","seed","cagr"]
+                                        ).properties(height=200)
+                                        heat_chart = apply_console_theme(heat_chart)
+                                        st.caption("CAGR Heatmap (Param Hash vs Seed)")
+                                        st.altair_chart(heat_chart, use_container_width=True)
+                                    except Exception as _e_hm:
+                                        st.caption(f"(heatmap unavailable: {_e_hm})")
                                 except Exception:
                                     st.caption("(results table unavailable)")
-                        with st.expander("Raw Results JSON", expanded=False):
-                            st.json(last)
         else:
             st.caption("Strategy Batch Panel deaktiviert (VEK_STRAT_SWEEP=0).")
 
@@ -1016,7 +1095,36 @@ with tabs[5]:
                 card_id = c1.text_input("card_id", value=f"dc_{len(repo_dc.all())+1}")
                 author = c2.text_input("author", value="me")
                 title = st.text_input("title")
-                # ... existing code continues (unchanged) ...
+                description = st.text_area("description", height=60)
+                c3, c4 = st.columns(2)
+                ticker = c3.text_input("ticker (optional)").upper()
+                as_of = c4.text_input("as_of (YYYY-MM-DD)", value=datetime.now().strftime("%Y-%m-%d"))
+                long_term = st.checkbox("Long Term Holding", value=True, help="Mark as long-term investment")
+                submitted_dc = st.form_submit_button("Create Decision Card")
+                if submitted_dc:
+                    with st.spinner("Saving card..."):
+                        try:
+                            card = make_decision_card(
+                                card_id=card_id,
+                                author=author,
+                                title=title,
+                                description=description,
+                                ticker=ticker or None,
+                                as_of=as_of or None,
+                                long_term=long_term,
+                            )
+                            repo_dc.add(card)
+                            st.success(f"Decision Card {card_id} created")
+                        except Exception as e:
+                            st.error(f"Error creating card: {e}")
+        st.markdown("---")
+        st.subheader("Existing Decision Cards")
+        if repo_dc.all():
+            for card in repo_dc.all():
+                with st.expander(card.card_id, expanded=False):
+                    st.json(card.to_dict())
+        else:
+            st.info("No decision cards found. Create a new card using the form above.")
 
 with tabs[6]:
     st.subheader("Investment Workbench Übersicht (Roadmap Preview)")
@@ -1029,9 +1137,7 @@ with tabs[6]:
         {"Feature":"Return Distribution","Status":"✅ (flag)","Flag":"VEK_ANALYTICS_EXT","Backend":"patterns.return_distribution","UI":"Analytics Extended"},
         {"Feature":"Holding Duration Stats","Status":"✅","Flag":"VEK_PATTERNS","Backend":"patterns.holding_duration_histogram","UI":"Analytics"},
         {"Feature":"Position Size / Exposure","Status":"✅ (flag)","Flag":"VEK_ANALYTICS_EXT","Backend":"metrics.position_size_series","UI":"Analytics Extended"},
-        {"Feature":"Queue Aggregate Metrics","Status":"✅","Flag":"-","Backend":"testqueue.aggregate_metrics","UI":"DevTools / Workbench"},
-        {"Feature":"Queue Persistence Health","Status":"✅","Flag":"-","Backend":"testqueue.get_persistence_stats","UI":"Workbench"},
-        {"Feature":"Snapshots (Regression)","Status":"✅ (basic)","Flag":"-","Backend":"devtools.snapshot","UI":"DevTools"},
+    # Removed Dev/Test oriented rows (Queue metrics, Snapshots) in investor-focused view
         {"Feature":"Decision Cards","Status":"✅","Flag":"VEK_DECISIONCARDS","Backend":"decision_card_repo","UI":"DecisionCards"},
         {"Feature":"Retrieval (Keyword)","Status":"✅ (basic)","Flag":"-","Backend":"retrieval.retrieve","UI":"Retrieval"},
         {"Feature":"Strategy Backtest (Sim Walk)","Status":"✅ (MVP)","Flag":"-","Backend":"sim.simple_walk","UI":"Simulation"},
@@ -1072,22 +1178,7 @@ with tabs[6]:
     else:
         st.caption("Gib Mark Prices als JSON ein um Pro-Ticker unrealized zu sehen.")
     st.markdown("---")
-    # Queue Health
-    st.subheader("Queue Health & Persistence")
-    try:
-        from app.core import testqueue as _tq
-        q_agg = _tq.aggregate_metrics(limit=50)
-        q_persist = _tq.get_persistence_stats()
-        colh1, colh2 = st.columns(2)
-        with colh1:
-            st.caption("Aggregate Runs (recent)")
-            st.json(q_agg)
-        with colh2:
-            st.caption("Persistence Stats")
-            st.json(q_persist)
-    except Exception as e:
-        st.error(f"Queue Health Fehler: {e}")
-    st.markdown("---")
+    # Queue Health removed (Dev/Test scope)
     st.subheader("Zukunft Side-Bar (Mock)")
     st.markdown("""
     Geplante Erweiterungen:
